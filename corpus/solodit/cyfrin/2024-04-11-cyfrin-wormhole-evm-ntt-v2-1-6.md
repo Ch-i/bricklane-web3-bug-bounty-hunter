@@ -1,0 +1,49 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2024-04-11-cyfrin-wormhole-evm-ntt-v2-1-6
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2024-04-11T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2024-04-11-cyfrin-wormhole-evm-ntt-v2.md
+tags:
+- firm:cyfrin
+- report:2024-04-11-cyfrin-wormhole-evm-ntt-v2
+title: Lack of a gas refund in the current design can lead to the overcharging of
+  users and misaligned relayer incentives that can choke message execution
+vuln_class: []
+---
+
+# Lack of a gas refund in the current design can lead to the overcharging of users and misaligned relayer incentives that can choke message execution
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2024-04-11-cyfrin-wormhole-evm-ntt-v2.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2024-04-11-cyfrin-wormhole-evm-ntt-v2.md)_
+
+---
+
+**Description:** To understand gas handling, it is important to highlight a few key aspects of the current design:
+
+1. On the target chain, Transceivers can either attest to a message or attest and execute a message. Transceivers up to the threshold attest to a message, while the Transceiver who will cause the threshold to be reached attests and executes a message.
+
+2. Each transceiver quotes a gas estimate on the source chain. When quoting a price, no Transceiver knows if its peer on the target chain will simply attest to a message or both attest and execute a message. This means that every Transceiver quotes a gas estimate that assumes its peer will be executing a message.
+
+Based on the two above facts, the following can be deduced:
+
+1. If the threshold has not yet been reached, a sender is paying a delivery fee for every Transceiver, even ones that are attesting a message after it was already executed.
+2. The sender is paying for a scenario where every Transceiver is responsible for executing a message on the target chain. In reality, only one transceiver will execute, and all others will attest.
+3. If a relayer consistently calls a Transceiver before the threshold is reached, a relayer will earn more than is spent in terms of gas.
+4. The above point incentivizes relayers to always be the ones to attest and not to execute. A clever relayer can simply query `messageAttestations` off-chain and skip a delivery if `messageAttestations == threshold - 1`, since a relayer spends less gas than what they charged on the source chain if they deliver before OR after a threshold is met.
+
+**Impact:**
+1. Users are overcharged on the source chain without recourse due to the lack of a refund mechanism.
+2. Relayers can choke message execution by skipping execution of the message that meets the attestation threshold. Current economic incentives benefit relayers if they skip this specific message.
+
+**Recommended Mitigation:** In the case of standard relayers, consider a mechanism to refund excess gas to the recipient address on the target chain. `DeliveryProvider:: quoteEvmDeliveryPrice ` in the core Wormhole codebase returns a `targetChainRefundPerUnitGasUnused` parameter that is currently unused. Consider using this input to calculate the excess fee that can be refunded to the senders. Doing so will not only save costs for users but also remove any misaligned economic incentives for the relayers.
+
+**Wormhole Foundation:** Fixed in [PR \#326](https://github.com/wormhole-foundation/example-native-token-transfers/pull/326).
+
+**Cyfrin:** Verified. Transceivers now receive a refund address, and standard relaying for the `WormholeTransceiver` now issues refunds.

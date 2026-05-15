@@ -1,0 +1,66 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2023-09-06-woosh-deposit-vault-0-0
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2023-09-06T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2023-09-06-Woosh%20Deposit%20Vault.md
+tags:
+- firm:cyfrin
+- report:2023-09-06-woosh-deposit-vault
+title: Non-standard ERC20 tokens are not supported
+vuln_class: []
+---
+
+# Non-standard ERC20 tokens are not supported
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2023-09-06-Woosh Deposit Vault.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2023-09-06-Woosh%20Deposit%20Vault.md)_
+
+---
+
+**Severity:** Medium
+
+**Description:** The protocol implemented a function `deposit()` to allow users to deposit.
+```solidity
+DepositVault.sol
+37:     function deposit(uint256 amount, address tokenAddress) public payable {
+38:         require(amount > 0 || msg.value > 0, "Deposit amount must be greater than 0");
+39:         if(msg.value > 0) {
+40:             require(tokenAddress == address(0), "Token address must be 0x0 for ETH deposits");
+41:             uint256 depositIndex = deposits.length;
+42:             deposits.push(Deposit(payable(msg.sender), msg.value, tokenAddress));
+43:             emit DepositMade(msg.sender, depositIndex, msg.value, tokenAddress);
+44:         } else {
+45:             require(tokenAddress != address(0), "Token address must not be 0x0 for token deposits");
+46:             IERC20 token = IERC20(tokenAddress);
+47:             token.safeTransferFrom(msg.sender, address(this), amount);
+48:             uint256 depositIndex = deposits.length;
+49:             deposits.push(Deposit(payable(msg.sender), amount, tokenAddress));//@audit-issue fee-on-transfer, rebalancing tokens will cause problems
+50:             emit DepositMade(msg.sender, depositIndex, amount, tokenAddress);
+51:
+52:         }
+53:     }
+```
+Looking at the line L49, we can see that the protocol assumes `amount` of tokens were transferred.
+But this does not hold true for some non-standard ERC20 tokens like fee-on-transfer tokens or rebalancing tokens.
+(Refer to [here](https://github.com/d-xo/weird-erc20) about the non-standard weird ERC20 tokens)
+
+For example, if token incurs fee on transfer, the actually transferred amount will be less than the provided parameter `amount` and the `deposits` will have a wrong state value. Because the current implementation only allows full withdrawal, this means the tokens will be locked in the contract permanently.
+
+**Impact:** If non-standard ERC20 tokens are used, the tokens could be locked in the contract permanently.
+
+**Recommended Mitigation:**
+- We recommend adding another field in the `Deposit` structure, say `balance`
+- We recommend allow users to withdraw partially and decrease the `balance` field appropriately for successful withdrawals.
+If these changes are going to be made, we note that there are other parts that need changes. For example, the withdraw function would need to be updated so that it does not require the withdrawal amount is same to the original deposit amount.
+
+**Protocol:**
+Contract updated to support non-standard ERC-20 tokens. We've decided to not allow users to partially withdraw since it would complicate the logic of the signatures, as of now only full withdraws can be executed.
+
+**Cyfrin:** Verified in commit [405fa78](https://github.com/HyperGood/woosh-contracts/commit/405fa78a2c0cf8b8ab8943484cb95b5c8807cbfb).

@@ -1,0 +1,45 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-zokyo-2024-10-16-isle-finance-0-2
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2024-10-16T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2024-10-16-Isle%20Finance.md
+tags:
+- firm:zokyo
+- report:2024-10-16-isle-finance
+title: Rounding operations for late interest payments may result in slight overcharges
+vuln_class: []
+---
+
+# Rounding operations for late interest payments may result in slight overcharges
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Zokyo_  
+_Source report: [2024-10-16-Isle Finance.md](https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2024-10-16-Isle%20Finance.md)_
+
+---
+
+**Severity**: Low 
+
+**Status**: Acknowledged
+
+**Location**: LoanManager.sol#_getLateInterest,_getInterest
+
+**Description**: 
+
+Users of the protocol are able to utilize the LoanManager contract in order to take out loans which are required to be repaid with interest. Should a user be late on repayments, they will incur a late modifier on their interest rate. This is denoted by the periodicInterestRate through the following formula:
+
+Let interest be 0.12*1e6, currentTime be block.timestamp and dueDate be block.timestamp - 1 days meaning repayments are late by one day. If this is inserted into the formula, a one day late periodic interest rate of 328767123287671 is paid. With this in mind, if the equation is reevaluated to modify the dueDate to block.timestamp - (2 days + 5 hours) meaning the user is late on repayments by 2 days and 5 hours. This would return a result of 986301369863013. If 986301369863013 is divided by 328767123287671 it can be seen that the periodic interest of the 1 day late value perfectly fits into the overdue value by 2 days and 5 hours exactly 3 times which means if a user is late on their repayments by just one second, they will be required to pay the full days interest (in this case, the user will have to pay a 3 day late interest rate when in reality they are late by 2 days and 5 hours). The result is that users could be overpaying on their late interest rates resulting in an unnecessary loss of funds. 
+
+**Recommendation**
+
+It’s recommended that the developers refactor the late interest repayment units to reflect an interest rate per second as opposed to interest rate per day. This is because Solidity will truncate values when dividing in mathematical operations and as a result, rounding errors may cause users to pay more than what is necessary to return their position to a healthy state. 
+
+**Client comment** :
+
+We acknowledge  optimizing the interest calculation per second would improve the accuracy and fairness of the protocol, however, using the current rounding does not pose a significant risk to users.

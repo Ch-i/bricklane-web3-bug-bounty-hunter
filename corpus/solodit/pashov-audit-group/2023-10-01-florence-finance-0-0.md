@@ -1,0 +1,41 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-pashov-audit-group-2023-10-01-florence-finance-0-0
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2023-10-01T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Pashov%20Audit%20Group/2023-10-01-Florence%20Finance.md
+tags:
+- firm:pashov-audit-group
+- report:2023-10-01-florence-finance
+title: '[M-01] Burned tokens can be re-minted into the `totalSupply`'
+vuln_class: []
+---
+
+# [M-01] Burned tokens can be re-minted into the `totalSupply`
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Pashov Audit Group_  
+_Source report: [2023-10-01-Florence Finance.md](https://github.com/solodit/solodit_content/blob/main/reports/Pashov%20Audit%20Group/2023-10-01-Florence%20Finance.md)_
+
+---
+
+**Severity**
+
+**Impact:**
+Low, as it won't lead to funds loss but breaks a protocol invariant/assumption
+
+**Likelihood:**
+High, as it becomes a problem whenever someone burns their tokens
+
+**Description**
+
+The `FlorenceFinanceMediciToken` contract inherits from `ERC20CappedUpgradeable` and has a max supply limit of "1_000_000_000 \* 10 \*\* 18" token units. The issue is that the contract also inherits from the `ERC20BurnableUpgradeable` contract, which means that when a user calls the `burn` method, the `totalSupply` will be subtracted from, meaning if 10 tokens existed and are all burned, but then 10 new tokens are minted, now `totalSupply = 10` which is not the assumption that the protocol has, which is that the total supply of minted tokens can be maximum "1_000_000_000 \* 10 \*\* 18".
+
+**Recommendations**
+
+Remove the inheritance from `ERC20BurnableUpgradeable` in `FlorenceFinanceMediciToken` so that burning tokens with subtracting from `totalSupply` is not possible.

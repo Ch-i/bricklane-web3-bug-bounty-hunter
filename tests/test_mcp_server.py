@@ -32,7 +32,12 @@ async def test_search_and_read():
             assert '"total"' in text
             assert "swc" in text
 
-            hits = await session.call_tool("search_corpus", {"query": "reentrancy", "top_k": 3})
+            # Search for something specific to SWC-107 so it ranks first
+            # regardless of how big the rest of the corpus is.
+            hits = await session.call_tool(
+                "search_corpus",
+                {"query": "checks-effects-interactions pattern", "source": ["swc"], "top_k": 3},
+            )
             hits_text = hits.content[0].text
             assert "swc-107" in hits_text
 

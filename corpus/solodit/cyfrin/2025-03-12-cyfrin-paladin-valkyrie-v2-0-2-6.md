@@ -1,0 +1,150 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2025-03-12-cyfrin-paladin-valkyrie-v2-0-2-6
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2025-03-12T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-03-12-cyfrin-paladin-valkyrie-v2.0.md
+tags:
+- firm:cyfrin
+- report:2025-03-12-cyfrin-paladin-valkyrie-v2-0
+title: '`TimeWeightedIncentiveLogic` distributions are not possible for tokens that
+  revert on zero transfers'
+vuln_class: []
+---
+
+# `TimeWeightedIncentiveLogic` distributions are not possible for tokens that revert on zero transfers
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2025-03-12-cyfrin-paladin-valkyrie-v2.0.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-03-12-cyfrin-paladin-valkyrie-v2.0.md)_
+
+---
+
+**Description:** When rewards in a given token are deposited to `TimeWeightedIncentiveLogic` for the first time, the cached end timestamp will be zero. Comparison with the current non-zero block timestamp causes execution to enter the conditional block that handles new distributions after the previous one is over. In general, this logic is sound; however, attempting to remove past rewards when there are none for the first distribution will result in a zero value transfer.
+
+```solidity
+function _depositRewards(
+    IncentivizedPoolId id,
+    address token,
+    uint256 amount,
+    uint256 duration,
+    uint256 requiredDuration,
+    RewardType rewardType
+) internal {
+    ...
+
+    // Update the reward distribution parameters
+    uint32 endTimestampCache = _state.endTimestamp;
+    if (endTimestampCache < block.timestamp) {
+        ...
+
+        // Remove past rewards if the distribution is over
+        _removePastRewards(id, token);
+
+        ...
+    } else {
+        ...
+    }
+
+    ...
+}
+```
+
+Here, the withdrawable amount is zero. If the intended reward token is one that reverts on zero transfers then this will prevent distributions for that token.
+
+```solidity
+function _removePastRewards(IncentivizedPoolId id, address token) internal {
+    address manager = distributionManagers[id][token];
+
+    uint256 amount = withdrawableAmounts[id][token][manager];
+    withdrawableAmounts[id][token][manager] = 0;
+
+    IERC20(token).safeTransfer(manager, amount);
+
+    emit RewardsWithdrawn(id, token, manager, amount);
+}
+```
+
+**Impact:** `TimeWeightedIncentiveLogic` distributions are not possible for tokens that revert on zero transfers
+
+**Proof of Concept:** The following test should be added to `TimeWeightedIncentiveLogic.t.sol`:
+
+```solidity
+function test_ZeroTransferDoS() public {
+    ZeroTransferERC20 token = new ZeroTransferERC20("TKN", "TKN", 18);
+
+    logic.updateDefaultFee(0);
+
+    IncentivizedPoolId incentivizedId = IncentivizedPoolKey({ id: pool1, lpToken: lpToken1 }).toId();
+
+    manager.setListedPool(incentivizedId, true);
+
+    address[] memory systems = new address[](1);
+    systems[0] = address(logic);
+
+    uint256 amount = 1000 ether;
+    uint256 duration = 5 weeks;
+    uint256 requiredDuration = 1 weeks;
+
+    manager.notifyAddLiquidty(systems, pool1, lpToken1, user1, int256(100 ether));
+
+    vm.expectRevert();
+    logic.depositRewards(
+        incentivizedId,
+        address(token),
+        amount,
+        duration,
+        requiredDuration,
+        TimeWeightedIncentiveLogic.RewardType.WITHDRAW
+    );
+}
+```
+
+For `ZeroTransferERC20`, override the relevant transfer functions:
+
+```solidity
+contract ZeroTransferERC20 is MockERC20 {
+    constructor(string memory name, string memory symbol, uint8 decimals) MockERC20(name, symbol, decimals) {}
+
+    function transfer(address to, uint256 amount) public virtual override returns (bool) {
+        if (amount == 0) revert("zero amount");
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public virtual override returns (bool) {
+        if (amount == 0) revert("zero amount");
+        return super.transferFrom(from, to, amount);
+    }
+}
+```
+
+**Recommended Mitigation:** Skip the transfer if there are no tokens to transfer:
+
+```diff
+function _removePastRewards(IncentivizedPoolId id, address token) internal {
+    address manager = distributionManagers[id][token];
+
+    uint256 amount = withdrawableAmounts[id][token][manager];
+    withdrawableAmounts[id][token][manager] = 0;
+
+--  IERC20(token).safeTransfer(manager, amount);
+++  if (amount != 0) IERC20(token).safeTransfer(manager, amount);
+
+    emit RewardsWithdrawn(id, token, manager, amount);
+}
+```
+
+**Paladin:** Fixed by commit [`b294f21`](https://github.com/PaladinFinance/Valkyrie/pull/5/commits/b294f21b27c6d60a8238015018b16d1fb3d17d98).
+
+**Cyfrin:** Verified. Withdrawal of zero amounts now return early, bypassing the state update, transfer, and event emission.
+
+\clearpage

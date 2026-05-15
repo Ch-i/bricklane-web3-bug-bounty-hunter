@@ -1,0 +1,55 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2024-01-24-cyfrin-solidlyv3-0-0
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2024-01-24T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2024-01-24-cyfrin-solidlyV3.md
+tags:
+- firm:cyfrin
+- report:2024-01-24-cyfrin-solidlyv3
+title: Attacker can abuse `RewardsDistributor::triggerRoot` to block reward claims
+  and unpause a paused state
+vuln_class: []
+---
+
+# Attacker can abuse `RewardsDistributor::triggerRoot` to block reward claims and unpause a paused state
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2024-01-24-cyfrin-solidlyV3.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2024-01-24-cyfrin-solidlyV3.md)_
+
+---
+
+**Description:** Consider the code of [`RewardsDistributor::triggerRoot`](https://github.com/SolidlyV3/v3-rewards/blob/6dfb435392ffa64652c8f88c98698756ca80cf28/contracts/RewardsDistributor.sol#L511-L516):
+```solidity
+    function triggerRoot() external {
+        bytes32 rootCandidateAValue = rootCandidateA.value;
+        if (rootCandidateAValue != rootCandidateB.value || rootCandidateAValue == bytes32(0)) revert RootCandidatesInvalid();
+        root = Root({value: rootCandidateAValue, lastUpdatedAt: block.timestamp});
+        emit RootChanged(msg.sender, rootCandidateAValue);
+    }
+```
+
+This function:
+* can be called by anyone
+* if it succeeds, sets `root.value` to `rootCandidateA.value` and `root.lastUpdatedAt` to `block.timestamp`
+* doesn't reset `rootCandidateA` or `rootCandidateB`, so it can be called over and over again to continually update `root.lastUpdatedAt` or to set `root.value` to `rootCandidateA.value`.
+
+**Impact:** An attacker can abuse this function in 2 ways:
+* by calling it repeatedly an attacker can continually increase `root.lastUpdatedAt` to trigger the [claim delay revert](https://github.com/SolidlyV3/v3-rewards/blob/6dfb435392ffa64652c8f88c98698756ca80cf28/contracts/RewardsDistributor.sol#L190-L191) in `RewardsDistributor::claimAll` effectively blocking reward claims
+* by calling it after reward claims have been paused, an attacker can effectively unpause the paused state since `root.value` is over-written with the valid value from `rootCandidateA.value` and claim pausing [works](https://github.com/SolidlyV3/v3-rewards/blob/6dfb435392ffa64652c8f88c98698756ca80cf28/contracts/RewardsDistributor.sol#L547) by setting `root.value == zeroRoot`.
+
+**Recommended Mitigation:** Two possible options:
+* Make `RewardsDistributor::triggerRoot` a permissioned function such that an attacker can't call it
+* Change `RewardsDistributor::triggerRoot` to reset `rootCandidateA.value = zeroRoot` such that it can't be successfully called repeatedly.
+
+**Solidly:**
+Fixed in commits [653c196](https://github.com/SolidlyV3/v3-rewards/commit/653c19659474c93ef0958479191d8103bc7b7e82) & [1170eac](https://github.com/SolidlyV3/v3-rewards/commit/1170eacc9b08bed9453a34fdf498f8bb10457f17).
+
+**Cyfrin:**
+Verified. One consequence of the updated implementation is that the contract will start in the "paused" state and root candidates will be unable to be set. This means that the admin will have to set the first valid root via `setRoot` in order to "unpause" from the initial state post-deployment.

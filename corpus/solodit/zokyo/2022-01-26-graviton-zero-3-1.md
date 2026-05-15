@@ -1,0 +1,34 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-zokyo-2022-01-26-graviton-zero-3-1
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2022-01-26T00:00:00Z'
+related_swc: []
+severity: Informational
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2022-01-26-Graviton%20Zero.md
+tags:
+- firm:zokyo
+- report:2022-01-26-graviton-zero
+title: The Solidity version should be updated.
+vuln_class: []
+---
+
+# The Solidity version should be updated.
+
+_Section severity (from Solodit section header): Informational_  
+_Audit firm: Zokyo_  
+_Source report: [2022-01-26-Graviton Zero.md](https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2022-01-26-Graviton%20Zero.md)_
+
+---
+
+**Description**
+
+Best practices for Solidity development and auditors standard checklist requires strict and
+explicit usage of the latest stable version of Solidity, which is 0.8.11 at the moment.
+
+**Recommendation**:
+
+Consider updating to “pragma solidity 0.8.11;”.

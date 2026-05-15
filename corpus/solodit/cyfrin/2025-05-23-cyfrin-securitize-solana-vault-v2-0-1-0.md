@@ -1,0 +1,88 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2025-05-23-cyfrin-securitize-solana-vault-v2-0-1-0
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2025-05-23T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-05-23-cyfrin-securitize-solana-vault-v2.0.md
+tags:
+- firm:cyfrin
+- report:2025-05-23-cyfrin-securitize-solana-vault-v2-0
+title: Missing Slippage Check on `liquidation_amount` in Redemption-Enabled Vaults
+vuln_class: []
+---
+
+# Missing Slippage Check on `liquidation_amount` in Redemption-Enabled Vaults
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2025-05-23-cyfrin-securitize-solana-vault-v2.0.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-05-23-cyfrin-securitize-solana-vault-v2.0.md)_
+
+---
+
+**Description:** When calling `liquidate_handler()` the liquidator provide the minimum amount of assets he is willing to receive. either assets or liquidation tokens
+
+```rust
+/// ## Arguments
+...
+/// - `min_output_amount`: An optional minimum output amount to ensure sufficient assets or liquidation tokens are received.
+```
+
+The slippage check is implemented only for assets before checking the type of the Vault weather it support Redemption or not.
+
+```rust
+>>  if let Some(min_output_amount) = min_output_amount {
+        require_gt!(
+            assets,
+            min_output_amount,
+            ScVaultError::InsufficientOutputAmount
+        );
+    }
+
+    ...
+
+    if let Some(ref redemption_program) = ctx.accounts.redemption_program {
+        ...
+        // Transfer received liquidation tokens to liquidator.
+        transfer_from!(
+            liquidation_token_vault,                                  // from
+            liquidator_liquidation_ata,                        // to
+            ctx.accounts.vault_authority,                             // authority
+            ctx.accounts.liquidation_token_program.as_ref().unwrap(), // token_program
+            liquidation_token_mint,                                   // mint
+>>          liquidation_amount,                                       // amount
+            liquidation_token_mint.decimals,                          // decimals
+            vault_authority_signer                                    // signer
+        );
+    } else {
+        ...
+    }
+```
+
+As we can see the amount the liquidator receives in case of Redemption is not `assets` value calculated. it is `liquidation_amount` received after redeeming.
+
+This wil result in incorrect slippage, as the liquidator will provide the minimum amount he is willing to receive from `liquidate token`, but the check will be made for `asset` instead.
+
+**Impact:**
+- Liquidator receives less than he wants
+
+**Proof of Concept:**
+- liquidator made the `min_output_amount` as `1000`
+- firing `liquidate_handler`
+- assets value is `1100` after calculations
+- slippage passed
+- firing `redemption_program::redeem()`
+- liquidation_amount is `900`
+- liquidator receives `900` token, although he mentioned he only accepts `1000` or more
+
+**Recommended Mitigation:**
+- Move the liquidation check and transfer it to the `else` block (the Vault that is not supporting Redemption)
+- Make another liquidation check aganist `liquidation_amount` for Vaults supporting redemption
+
+**Securitize:** Acknowledged, it’s acceptable from our side since it matches the behavior in the EVM version and we don’t intend to change it. However, the slippage documentation has been clarified in [56c8f9e](https://github.com/securitize-io/bc-solana-vault-sc/commit/56c8f9e8ac6420196ec2df3dddd5a8ee3a7e6965).
+
+\clearpage

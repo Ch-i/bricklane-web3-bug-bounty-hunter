@@ -1,0 +1,90 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2025-03-12-cyfrin-paladin-valkyrie-v2-0-2-2
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2025-03-12T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-03-12-cyfrin-paladin-valkyrie-v2.0.md
+tags:
+- firm:cyfrin
+- report:2025-03-12-cyfrin-paladin-valkyrie-v2-0
+title: Donations can be made directly to the Uniswap v4 pool due to missing overrides
+vuln_class: []
+---
+
+# Donations can be made directly to the Uniswap v4 pool due to missing overrides
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2025-03-12-cyfrin-paladin-valkyrie-v2.0.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-03-12-cyfrin-paladin-valkyrie-v2.0.md)_
+
+---
+
+**Description:** Currently, the donation hooks are not activated:
+
+```solidity
+function getHookPermissions() public pure virtual override returns (Hooks.Permissions memory) {
+    return Hooks.Permissions({
+        ...
+        beforeAddLiquidity: true,
+        beforeRemoveLiquidity: false,
+        afterAddLiquidity: false,
+        afterRemoveLiquidity: false,
+        beforeDonate: false,
+        afterDonate: false,
+        ...
+    });
+}
+```
+
+Given the following implementations of `PoolManager::donate` and `Hooks::beforeDonate` in Uniswap v4, donations will still be permitted due to an absence of the default behavior being overridden:
+
+```solidity
+function donate(PoolKey memory key, uint256 amount0, uint256 amount1, bytes calldata hookData)
+    external
+    onlyWhenUnlocked
+    noDelegateCall
+    returns (BalanceDelta delta)
+{
+    PoolId poolId = key.toId();
+    Pool.State storage pool = _getPool(poolId);
+    pool.checkPoolInitialized();
+
+    key.hooks.beforeDonate(key, amount0, amount1, hookData);
+
+    delta = pool.donate(amount0, amount1);
+
+    _accountPoolBalanceDelta(key, delta, msg.sender);
+
+    // event is emitted before the afterDonate call to ensure events are always emitted in order
+    emit Donate(poolId, msg.sender, amount0, amount1);
+
+    key.hooks.afterDonate(key, amount0, amount1, hookData);
+}
+
+function beforeDonate(IHooks self, PoolKey memory key, uint256 amount0, uint256 amount1, bytes calldata hookData)
+    internal
+    noSelfCall(self)
+{
+    if (self.hasPermission(BEFORE_DONATE_FLAG)) {
+        self.callHook(abi.encodeCall(IHooks.beforeDonate, (msg.sender, key, amount0, amount1, hookData)));
+    }
+}
+```
+
+The hooks don’t intend to have permissions enabled for `before/afterDonate()` but this simply means that the calls to the hooks are skipped. As such, donations can be made when this may not be intended; however, following extensive investigations, it does not appear this behavior can be leveraged to execute a first depositor inflation attacks.
+
+**Impact:** Fee growth can be artificially inflated by donations.
+
+**Recommended Mitigation:** The `beforeDonate()` hook should be activated to always revert on donations so as to avoid fee inflation.
+
+**Paladin:** Acknowledged, but donation increasing the `feeGrowth` for a given Pool/Range via the Hooks should not be an issue :
+• For the `FullRange`, donations will be rebalanced in the pool when liquidity is modified, either being used to add in the pool liquidity. Large donation might increase/decrease the price of the pool, but that can be later arbitraged, or the extra fees received will simply be donated back in the Pool after the rebalancing, to be used later.
+• For the `MultiRange`, it will either be used when rebalancing the liquidity in the range, or taken out for later use for rebalancing.
+As this should not impact the behavior of the Hook or the flow of incentives, we don’t think donations should be blocked for those Hooks.
+
+**Cyfrin:** Acknowledged.

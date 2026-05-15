@@ -1,0 +1,89 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2025-10-22-cyfrin-remora-dynamic-tokens-v2-1-2-5
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2025-10-22T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-10-22-cyfrin-remora-dynamic-tokens-v2.1.md
+tags:
+- firm:cyfrin
+- report:2025-10-22-cyfrin-remora-dynamic-tokens-v2-1
+title: Calling `PaymentSettler::setStableCoin` can lead to inability of holders to
+  claim funds and old stablecoin being trapped in the contract
+vuln_class: []
+---
+
+# Calling `PaymentSettler::setStableCoin` can lead to inability of holders to claim funds and old stablecoin being trapped in the contract
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2025-10-22-cyfrin-remora-dynamic-tokens-v2.1.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2025-10-22-cyfrin-remora-dynamic-tokens-v2.1.md)_
+
+---
+
+**Description:** An admin can call `PaymentSettler::setStablecoin` at any time. As the code is currently design this should only be done when the stablecoin balance of the contract is zero, which is a very rare occurrence given that many tokens will be at various stages of the their lifecycle.
+
+For instance, if `setStablecoin` were called in the middle of the burning phase of a central token, it would lead to the inability of some users to burn their tokens. This also holds if there are outstanding payouts to claim before burning is enabled.
+
+As it is not unknown for stablecoins to become de-pegged (even [USDC de-pegged for a few hours](https://cointelegraph.com/news/usdc-depegs-as-circle-confirms-3-3b-stuck-with-silicon-valley-bank)), a method for migrating from one stablecoin to another must be implemented.
+
+**Impact:** Changing the stablecoin may well become necessary if the current stablecoin loses its value. The problem then is that all currently active central tokens become affected by the change (and the existing funds become stuck).
+
+The impact is two-fold:
+1.  Any existing stable coins are trapped in the contract as there is no way to get them out.
+2. Users are unable to either claim payouts or burn their tokens.
+
+As this is a High Impact, but Low Likelihood bug its impact has been assessed as Medium.
+
+**Proof of Concept:** Add the following test to `PaymentSettlerTest.t.sol`. It demonstrates that a user would be unable to burn their tokens if `setStablecoin`
+
+```solidity
+    function test_cyfrin_setStablecoinCanLeadToDOS() public {
+        address user0 = getDomesticUser(0);
+        address user1 = getDomesticUser(1);
+        address central = address(centralTokenProxy);
+
+        centralTokenProxy.mint(address(this), 10_000);
+        centralTokenProxy.dynamicTransfer(user0, 5_000);
+        centralTokenProxy.dynamicTransfer(user1, 5_000);
+
+        paySettlerProxy.initiateBurning(central);
+        vm.warp(1 days + 1);
+
+        IERC20(address(stableCoin)).approve(address(paySettlerProxy), 1_000_000e6);
+        paySettlerProxy.enableBurning(central, address(this), 1_000_000e6);
+
+        // User 0 burns their tokens
+        vm.prank(user0); d_childTokenProxy.burn();
+
+        Stablecoin newStableCoin = new Stablecoin("DAI", "DAI", type(uint256).max/1e6, 6);
+        paySettlerProxy.setStablecoin(address(newStableCoin));
+
+        vm.startPrank(user1);
+        vm.expectPartialRevert(bytes4(keccak256("ERC20InsufficientBalance(address,uint256,uint256)")));
+        d_childTokenProxy.burn();
+    }
+```
+
+**Recommended Mitigation:** Initially, it might seem that one elegant solution to the problem is to store a copy of the current stablecoin address in the `TokenData` structure. This has the advantage of allowing holders of existing central tokens to still claim the funds they are entitled to. In the case that the stablecoin has gone down in value the loss has been socialised to everyone who was entitled to that stablecoin. Whether this is acceptable or not will affect the mitigation, but it is _one_ solution.
+
+However, the solution outline above does not take into account calling the following scenario:
+- `distributePayout`
+- followed by `setStableCoin`
+- followed by `distributePayment` or `enableBurning`
+
+Thus, to handle the transition from one stablecoin to the next (possibly multiple times) it will be necessary to store the address of the stablecoin on a _per-payout_ and _per-enable-burn_ basis, which adds significant complexity.
+
+Another solution would be to prevent calling `setStablecoin` unless all current central tokens were inactive. However, this does not account for the stablecoin-de-pegging scenario.
+
+A third solution would involve withdrawing the existing stablecoins and replacing them with an equivalent amount of the new stablecoin, however, this would shift the risk of a de-pegging event to Remora.
+
+There are many design considerations to take into account.
+
+**Remora:** Fixed at commit [470ed74](https://github.com/remora-projects/remora-dynamic-tokens/commit/470ed749b6657d74746910129865964c053102ab)
+
+**Cyfrin:** Verified. PaymentSettler transfers the balance of the existing stablecoin to the custodian (which includes fees), resets fees, and pulls the same amount of required stablecoin of the new stablecoin that the system must have to process payouts.

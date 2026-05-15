@@ -1,0 +1,88 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-zokyo-2023-06-09-narwhal-finance-1-2
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2023-06-09T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2023-06-09-Narwhal%20Finance.md
+tags:
+- firm:zokyo
+- report:2023-06-09-narwhal-finance
+title: Insufficient check on reward token balance
+vuln_class: []
+---
+
+# Insufficient check on reward token balance
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Zokyo_  
+_Source report: [2023-06-09-Narwhal Finance.md](https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2023-06-09-Narwhal%20Finance.md)_
+
+---
+
+**Severity**: Medium
+
+**Status**: Resolved
+
+**Description**
+
+In contracts NarwhalPool.sol and TradingVaultV2, at line 127 inside the setRewardDuration function check if balance of esToken is enough to distribute the newly added rewards for their duration. Current check cannot be sufficient to make sure that the contract has enough amount of esToken/esNAR.
+Let’s assume that rewardDuration is set for 7 days.
+Governance mints/sends 100 esTokens to the contract and calls notifyRewardAmount function providing 100 tokens as an argument.
+User stakes 1000 of whitelisted stake tokens.
+Seven days later, the user calls the earned function which returns ~100 reward tokens, but the user chooses not to harvest the accrued reward.
+Governance calls notifyRewardAmount function providing 100 tokens as an argument.
+Seven days later the user calls the earned function which returns ~200 esTokens. When a user tries to harvest the reward, transition will fail due to insufficient balance of esToken.
+
+```ts
+    it("Insufficient check on reward token balance ", async () => { 
+      await vault.setRewardToken(es.address, { from: deployer });
+  
+      const sevenDaysRewardsDuration = BN("604800"); //7 days in seconds
+      vault.setRewardsDuration(sevenDaysRewardsDuration, { from: deployer });
+
+
+      //Governance sends 100 esTokens 
+      await es.transfer(vault.address, new BigNumber(100e18));
+
+
+      //Governance calls notifyRewardAmount
+      const reward = new BigNumber(100e18);
+      await vault.notifyRewardAmount(reward, { from: deployer });
+
+
+      //User stakes 100 usdt
+      await vault.deposit(new BigNumber(100e18), user2, { from: user2, gas: 5000000, gasPrice: 500000000 }); 
+      
+      //7 days later
+      await time.increase(time.duration.seconds(604800));
+      let bal = await vault.earned(user2, { from: user2 })
+      console.log("first 7 days: ", bal.toString())
+
+
+      //Governance calls notifyRewardAmount
+      await vault.notifyRewardAmount(reward, { from: deployer });
+
+
+      //7 days later
+      await time.increase(time.duration.seconds(604800));
+      let bal2 = await vault.earned(user2, { from: user2 })
+      console.log("second 7 days: ", bal2.toString())
+      
+      expectRevert(
+        vault.harvest(user2, { from: user2 }), "BaseToken: transfer amount exceeds balance"
+        );
+    });
+```
+ 
+**Recommendation**: 
+
+Consider adding a transferFrom function to the notifyRewardAmount function in order to transfer rewardTokens during each call.
+
+**Fixed**: 
+
+Issue fixed in commit a72e06b

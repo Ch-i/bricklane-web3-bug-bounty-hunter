@@ -1,0 +1,35 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-zokyo-2022-01-26-graviton-zero-3-4
+ingested_at: '2026-05-15T13:52:11Z'
+protocol_category: []
+published_at: '2022-01-26T00:00:00Z'
+related_swc: []
+severity: Informational
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2022-01-26-Graviton%20Zero.md
+tags:
+- firm:zokyo
+- report:2022-01-26-graviton-zero
+title: Code could be simplified.
+vuln_class: []
+---
+
+# Code could be simplified.
+
+_Section severity (from Solodit section header): Informational_  
+_Audit firm: Zokyo_  
+_Source report: [2022-01-26-Graviton Zero.md](https://github.com/solodit/solodit_content/blob/main/reports/Zokyo/2022-01-26-Graviton%20Zero.md)_
+
+---
+
+**Description**
+
+StakingB_1.sol Line 609
+“pool.lastRewardBlock = block.number” can be executed before condition so this operation
+shouldn’t be repeated twice in the code.
+
+**Recommendation**:
+
+Use just one realisation of “pool.lastRewardBlock = block.number” before condition.
