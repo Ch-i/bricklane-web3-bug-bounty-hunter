@@ -472,6 +472,76 @@ def cmd_findings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pocs(args: argparse.Namespace) -> int:
+    run_dir = Path(args.run_dir)
+    if not run_dir.exists():
+        cand = REPO_ROOT / "audits" / args.run_dir
+        if cand.exists():
+            run_dir = cand
+        else:
+            console.print(f"[red]run dir not found: {args.run_dir}[/red]")
+            return 1
+    findings = _load_findings(run_dir)
+    poc_findings = [f for f in findings if f.get("foundry_poc")]
+
+    table = Table(title=f"PoCs — {run_dir.name}", show_lines=False)
+    table.add_column("#", justify="right")
+    table.add_column("Status")
+    table.add_column("Severity")
+    table.add_column("Title")
+    table.add_column("Test", style="dim")
+    table.add_column("Logs", style="dim")
+
+    if not poc_findings:
+        console.print(f"[dim]No structured foundry_poc on any finding in {run_dir.name}.[/dim]")
+        return 0
+
+    for i, f in enumerate(poc_findings, start=1):
+        art = f.get("poc_artifacts") or {}
+        table.add_row(
+            str(i),
+            _poc_text(f.get("poc_status", "not-attempted")),
+            _sev_text(f.get("severity", "?")),
+            f.get("title", "")[:60],
+            Path(art.get("test_path", "?")).name if art.get("test_path") else "—",
+            "stdout/stderr in poc/" if art.get("stdout_log") else "—",
+        )
+    console.print(table)
+
+    if args.verbose:
+        for i, f in enumerate(poc_findings, start=1):
+            console.print()
+            console.print(Rule(f"#{i}: {f.get('title', '')[:80]}", style="dim"))
+            console.print(
+                Panel(
+                    f.get("foundry_poc", {}).get("exploit", "(empty)"),
+                    title="exploit",
+                    border_style="dim",
+                )
+            )
+    return 0
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    from harness.trace import replay_tx
+
+    try:
+        result = replay_tx(args.tx_hash, args.chain)
+    except (FileNotFoundError, ValueError) as e:
+        console.print(f"[red]{e}[/red]")
+        return 1
+
+    if args.out:
+        Path(args.out).write_text(result.trace_text)
+        console.print(
+            f"trace written to {args.out} "
+            f"(rc={result.rc}, success={result.success}, gas_used={result.gas_used})"
+        )
+    else:
+        console.print(result.trace_text)
+    return 0 if result.rc == 0 else 1
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from harness.orchestrator import Orchestrator, OrchestratorOptions
 
@@ -549,6 +619,23 @@ def main(argv: list[str] | None = None) -> int:
     p_stat.add_argument("--follow", "-f", action="store_true", help="Continuous live update.")
     p_stat.add_argument("--interval", type=float, default=1.0, help="Refresh interval seconds.")
     p_stat.set_defaults(func=cmd_status)
+
+    p_pocs = sub.add_parser(
+        "pocs",
+        help="Show findings with structured foundry_poc + their execution status.",
+    )
+    p_pocs.add_argument("run_dir")
+    p_pocs.add_argument("--verbose", "-v", action="store_true", help="Also print each exploit body.")
+    p_pocs.set_defaults(func=cmd_pocs)
+
+    p_replay = sub.add_parser(
+        "replay",
+        help="Re-execute an on-chain tx in an Anvil sandbox with full call trace.",
+    )
+    p_replay.add_argument("tx_hash")
+    p_replay.add_argument("--chain", default="mainnet")
+    p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
+    p_replay.set_defaults(func=cmd_replay)
 
     args = parser.parse_args(argv)
     return args.func(args)
