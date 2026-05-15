@@ -542,6 +542,77 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0 if result.rc == 0 else 1
 
 
+def cmd_corpus(args: argparse.Namespace) -> int:
+    from harness import corpus as corpus_mod
+
+    if args.corpus_cmd == "stats":
+        stats = corpus_mod.stats()
+        table = Table(title="Corpus stats", show_header=False, box=None)
+        table.add_column("metric", style="cyan")
+        table.add_column("value")
+        table.add_row("total entries", str(stats["total"]))
+        table.add_row("by source", ", ".join(f"{k}={v}" for k, v in sorted(stats["by_source"].items())))
+        table.add_row("by severity", ", ".join(f"{k}={v}" for k, v in sorted(stats["by_severity"].items())))
+        console.print(table)
+        if stats.get("top_vuln_classes"):
+            t2 = Table(title="Top vuln_class tags", show_header=True, header_style="dim")
+            t2.add_column("class", style="cyan")
+            t2.add_column("count", justify="right")
+            for row in stats["top_vuln_classes"][:15]:
+                t2.add_row(row["vuln_class"], str(row["count"]))
+            console.print(t2)
+        return 0
+
+    if args.corpus_cmd == "search":
+        hits = corpus_mod.search(
+            query=args.query,
+            vuln_class=args.vuln_class,
+            severity=args.severity,
+            source=args.source,
+            top_k=args.top_k,
+        )
+        table = Table(title=f"Corpus search: {args.query!r}", show_lines=False)
+        table.add_column("#", justify="right")
+        table.add_column("Score", justify="right", style="dim")
+        table.add_column("Source", style="cyan")
+        table.add_column("Severity")
+        table.add_column("ID", style="cyan")
+        table.add_column("Title")
+        for i, h in enumerate(hits, 1):
+            table.add_row(
+                str(i),
+                f"{h.score:.2f}",
+                h.source,
+                _sev_text(h.severity or "?") if h.severity else Text("—", style="dim"),
+                h.id[:55],
+                h.title[:60],
+            )
+        console.print(table)
+        return 0
+
+    if args.corpus_cmd == "read":
+        entry = corpus_mod.get_entry(args.entry_id)
+        if entry is None:
+            console.print(f"[red]no such entry: {args.entry_id}[/red]")
+            return 1
+        meta_table = Table(show_header=False, box=None)
+        meta_table.add_column(style="cyan")
+        meta_table.add_column()
+        for k in ("id", "source", "title", "severity", "ingested_at", "published_at", "source_url"):
+            if entry.get(k) is not None:
+                meta_table.add_row(k, str(entry[k]))
+        if entry.get("vuln_class"):
+            meta_table.add_row("vuln_class", ", ".join(entry["vuln_class"]))
+        if entry.get("tags"):
+            meta_table.add_row("tags", ", ".join(entry["tags"][:6]))
+        console.print(Panel(meta_table, title=entry.get("id", "?"), border_style="cyan"))
+        if not args.meta_only:
+            console.print()
+            console.print(Markdown(entry.get("body", "")[:6000]))
+        return 0
+    return 1
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from harness.orchestrator import Orchestrator, OrchestratorOptions
 
@@ -636,6 +707,22 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--chain", default="mainnet")
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
+
+    p_corpus = sub.add_parser("corpus", help="Browse the corpus (search / read / stats).")
+    corpus_sub = p_corpus.add_subparsers(dest="corpus_cmd", required=True)
+    p_cs = corpus_sub.add_parser("stats", help="Counts by source / severity / vuln_class.")
+    p_cs.set_defaults(func=cmd_corpus)
+    p_cq = corpus_sub.add_parser("search", help="Full-text search across corpus.")
+    p_cq.add_argument("query")
+    p_cq.add_argument("--vuln-class", action="append")
+    p_cq.add_argument("--severity", action="append")
+    p_cq.add_argument("--source", action="append")
+    p_cq.add_argument("--top-k", type=int, default=10)
+    p_cq.set_defaults(func=cmd_corpus)
+    p_cr = corpus_sub.add_parser("read", help="Read a single corpus entry.")
+    p_cr.add_argument("entry_id")
+    p_cr.add_argument("--meta-only", action="store_true", help="Skip the body, show only frontmatter.")
+    p_cr.set_defaults(func=cmd_corpus)
 
     args = parser.parse_args(argv)
     return args.func(args)
