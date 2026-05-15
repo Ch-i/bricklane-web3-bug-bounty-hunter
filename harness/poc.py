@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -250,22 +251,40 @@ def execute_poc(
 # ---------------------------------------------------------------------------
 
 
-def attempt_all(findings: list[Finding], *, run_dir: Path, project_root: Path) -> list[Finding]:
+def attempt_all(
+    findings: list[Finding],
+    *,
+    run_dir: Path,
+    project_root: Path,
+    progress: "Callable[[int, int, Finding, str], None] | None" = None,
+) -> list[Finding]:
     """For each finding with a structured foundry_poc, scaffold + execute.
 
     Mutates the findings in place (sets `poc_status` and `poc_artifacts`)
     and returns the same list for chainability.
+
+    ``progress(idx, total, finding, phase)`` is called for status changes:
+    phase ∈ {"scaffolding", "running", "done:<status>", "skipped"}.
     """
     poc_dir = run_dir / "poc"
+    total = len(findings)
     for i, f in enumerate(findings):
         if not f.foundry_poc:
             f.poc_status = "not-applicable"
+            if progress:
+                progress(i, total, f, "skipped")
             continue
+        if progress:
+            progress(i, total, f, "scaffolding")
         scaffold = scaffold_poc(f, out_dir=poc_dir, finding_index=i)
         if not scaffold:
             f.poc_status = "not-applicable"
+            if progress:
+                progress(i, total, f, "skipped")
             continue
 
+        if progress:
+            progress(i, total, f, "running")
         exec_result = execute_poc(
             scaffold.test_path,
             scaffold.contract_name,
@@ -288,4 +307,6 @@ def attempt_all(findings: list[Finding], *, run_dir: Path, project_root: Path) -
             if stderr_log.is_relative_to(REPO_ROOT)
             else str(stderr_log),
         }
+        if progress:
+            progress(i, total, f, f"done:{exec_result.status}")
     return findings

@@ -462,23 +462,88 @@ class Orchestrator:
         if not self.opts.with_pocs:
             cmd.append("--no-pocs")
 
-        msg = "[cyan]validating citations & rendering report"
-        if self.opts.with_pocs:
-            msg += " (scaffolding + running PoCs)"
-        msg += "...[/cyan]"
-        with console.status(msg, spinner="dots"):
-            proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_ROOT), check=False)
+        # Stream stderr so per-PoC progress (printed by audit_runner.cmd_finalize)
+        # surfaces in the spinner. stdout is buffered; we parse its final JSON line.
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(REPO_ROOT),
+            bufsize=1,
+        )
+
+        out_lines: list[str] = []
+        err_lines: list[str] = []
+        latest_activity = ["starting..."]
+        poc_done_count = [0]
+
+        def _drain(stream, sink, is_stderr: bool) -> None:
+            for line in stream:
+                sink.append(line)
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if is_stderr:
+                    if stripped.startswith("poc ["):
+                        latest_activity[0] = stripped[:140]
+                        if "done:" in stripped:
+                            poc_done_count[0] += 1
+                    elif self.opts.verbose:
+                        sys.stderr.write(line)
+
+        t_out = threading.Thread(target=_drain, args=(proc.stdout, out_lines, False), daemon=True)
+        t_err = threading.Thread(target=_drain, args=(proc.stderr, err_lines, True), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        spinner_prefix = (
+            "[cyan]validating citations & rendering report"
+            + (" (scaffolding + running PoCs)" if self.opts.with_pocs else "")
+            + "...[/cyan]"
+        )
+        start = time.monotonic()
+        with console.status(spinner_prefix, spinner="dots") as status:
+            while proc.poll() is None:
+                elapsed = int(time.monotonic() - start)
+                status.update(
+                    f"[cyan]finalize · {elapsed}s · pocs done {poc_done_count[0]}[/cyan] "
+                    f"[dim]· {latest_activity[0]}[/dim]"
+                )
+                time.sleep(0.3)
+        t_out.join(timeout=3)
+        t_err.join(timeout=3)
+
+        # Persist logs for post-hoc inspection.
+        (self.run_dir / "finalize-stdout.log").write_text("".join(out_lines))
+        (self.run_dir / "finalize-stderr.log").write_text("".join(err_lines))
 
         if proc.returncode != 0:
             _fail(f"finalize rc={proc.returncode}")
-            _info((proc.stderr or proc.stdout)[-400:])
-            return StageResult("finalize", False, proc.stderr[-200:])
+            _info(("".join(err_lines) or "".join(out_lines))[-400:])
+            return StageResult("finalize", False, "".join(err_lines)[-200:])
+
         try:
-            summary = json.loads(proc.stdout.strip().splitlines()[-1])
+            summary = json.loads("".join(out_lines).strip().splitlines()[-1])
         except (IndexError, json.JSONDecodeError):
             summary = {}
+
+        # Surface per-PoC outcomes inline so the user sees what was reproduced.
+        poc_status_lines = [l for l in err_lines if "poc [" in l and "done:" in l]
+        for line in poc_status_lines:
+            stripped = line.strip()
+            # poc [N/T] done:reproduced: <title>
+            if "done:reproduced" in stripped:
+                _stage_line("✓", stripped, "bold green")
+            elif "done:unconfirmed" in stripped:
+                _stage_line("?", stripped, "yellow")
+            elif "done:compile-error" in stripped:
+                _stage_line("!", stripped, "red")
+            else:
+                _stage_line("·", stripped, "dim")
+
         _ok(f"report: {summary.get('report_path', '?')}")
-        if summary.get("findings_accepted"):
+        if summary.get("findings_accepted") is not None:
             _info(
                 f"findings accepted: {summary['findings_accepted']} "
                 f"(rejected: {summary.get('findings_rejected', 0)})"

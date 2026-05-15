@@ -282,7 +282,23 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         project_root = Path(prep["target"])
         if project_root.is_file():
             project_root = project_root.parent
-        attempt_all_pocs(check.valid, run_dir=run_dir, project_root=project_root)
+
+        # Emit human-readable progress to stderr so the orchestrator's
+        # streaming layer can surface per-PoC status in the spinner.
+        def _poc_progress(idx: int, total: int, finding: Finding, phase: str) -> None:
+            title = (finding.title or "")[:60]
+            print(
+                f"poc [{idx + 1}/{total}] {phase}: {title}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        attempt_all_pocs(
+            check.valid,
+            run_dir=run_dir,
+            project_root=project_root,
+            progress=_poc_progress,
+        )
 
     static_tools_raw = json.loads((run_dir / "static-tools.json").read_text())
     static_tools = [StaticToolFindings.model_validate(t) for t in static_tools_raw]
