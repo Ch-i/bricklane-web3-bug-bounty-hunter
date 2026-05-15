@@ -485,11 +485,18 @@ def cmd_audit(args: argparse.Namespace) -> int:
         deep=args.deep,
         with_pocs=not args.no_pocs,
         verbose=args.verbose,
+        dry_run=args.dry_run,
     )
     orch = Orchestrator(opts)
     if args.multimodel:
         return orch.run_multimodel()
     return orch.run_single()
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from harness.doctor import run_doctor
+
+    return run_doctor(skip_auth=args.skip_auth)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -510,7 +517,20 @@ def main(argv: list[str] | None = None) -> int:
     p_audit.add_argument("--deep", action="store_true", help="Also run Halmos/Mythril.")
     p_audit.add_argument("--no-pocs", action="store_true", help="Skip PoC scaffolding + execution.")
     p_audit.add_argument("--verbose", action="store_true", help="Stream subprocess stderr to terminal.")
+    p_audit.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run prep only (static tools + materialize source). Skip the LLM calls — useful "
+        "for verifying every tool fires and the brief is shaped right before spending on Opus.",
+    )
     p_audit.set_defaults(func=cmd_audit)
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="Verify all tools, claude/codex auth, corpus, and MCP config.",
+    )
+    p_doctor.add_argument("--skip-auth", action="store_true", help="Skip the live claude auth check.")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     p_list = sub.add_parser("list", help="Table of audit runs.")
     p_list.add_argument("--root", help="Override audits dir (default: ./audits).")

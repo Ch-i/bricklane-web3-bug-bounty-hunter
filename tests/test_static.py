@@ -21,13 +21,19 @@ def test_slither_detects_planted_bugs():
 
 
 def test_aderyn_reports_missing_gracefully(tmp_path):
-    # We don't expect aderyn to be installed in CI; just verify the wrapper
-    # returns the documented failure mode rather than raising.
+    # Verify the wrapper returns documented failure modes rather than raising.
+    # Two valid outcomes depending on whether aderyn is installed:
+    #   not installed -> "not on PATH"
+    #   installed     -> runs against the empty dir, fails to produce JSON,
+    #                    reports "did not produce JSON" or similar
+    from harness.static import _which
     cfg = StaticToolsConfig(target=tmp_path, target_kind="directory")
     result = run_aderyn(cfg)
-    if shutil.which("aderyn"):
-        # If it's actually installed, we accept either succeed or fail with a real error.
-        assert result.tool == "aderyn"
+    assert result.tool == "aderyn"
+    if _which("aderyn"):
+        # Installed: should fail gracefully on an empty dir (no .sol files).
+        assert not result.succeeded
+        assert result.error  # something descriptive, not None
     else:
         assert not result.succeeded
         assert "not on PATH" in (result.error or "")

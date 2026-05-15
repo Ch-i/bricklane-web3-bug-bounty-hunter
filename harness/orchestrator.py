@@ -94,6 +94,7 @@ class OrchestratorOptions:
     deep: bool = False
     with_pocs: bool = True
     verbose: bool = False
+    dry_run: bool = False
     auditor_timeout_s: int = 1800
     reconciler_timeout_s: int = 1800
 
@@ -162,10 +163,26 @@ class Orchestrator:
         )
 
     def _run_claude_auditor(self) -> StageResult:
+        return self._run_claude_agent(
+            agent="web3-auditor",
+            brief=self._claude_brief(),
+            stage_name="claude-auditor",
+            expected_output_file="auditor-output.json",
+        )
+
+    def _run_claude_agent(
+        self,
+        *,
+        agent: str,
+        brief: str,
+        stage_name: str,
+        expected_output_file: str | None,
+    ) -> StageResult:
+        """Spawn claude -p in stream-json mode and surface tool-uses live."""
         claude_bin = shutil.which("claude")
         if not claude_bin:
             _fail("claude CLI not on PATH")
-            return StageResult("claude-auditor", False, "missing CLI")
+            return StageResult(stage_name, False, "missing CLI")
 
         add_dirs = {str(REPO_ROOT.resolve())}
         target_resolved = Path(self.prep_meta["target"]).resolve()
@@ -175,19 +192,19 @@ class Orchestrator:
         ):
             add_dirs.add(str(target_resolved))
 
-        cmd = [claude_bin, "-p", "--agent", "web3-auditor", "--model", self.opts.model]
+        cmd = [claude_bin, "-p", "--agent", agent, "--model", self.opts.model]
         for d in sorted(add_dirs):
             cmd += ["--add-dir", d]
-        cmd += ["--output-format", "json", "--dangerously-skip-permissions", self._claude_brief()]
+        cmd += [
+            "--output-format", "stream-json",
+            "--verbose",  # stream-json requires --verbose
+            "--dangerously-skip-permissions",
+            brief,
+        ]
 
-        return self._run_streaming(cmd, "claude-auditor", "auditor-output.json")
+        return self._run_claude_stream(cmd, stage_name, expected_output_file)
 
     def _run_reconciler(self) -> StageResult:
-        claude_bin = shutil.which("claude")
-        if not claude_bin:
-            _fail("claude CLI not on PATH")
-            return StageResult("reconciler", False, "missing CLI")
-
         brief = (
             f"You are reconciling two audit passes for the target below.\n\n"
             f"TARGET: {self.prep_meta['target']}\n"
@@ -203,30 +220,20 @@ class Orchestrator:
             f"{self.prep_meta['run_dir']}/reconciled.json.\n"
         )
 
-        add_dirs = {str(REPO_ROOT.resolve())}
-        target_resolved = Path(self.prep_meta["target"]).resolve()
-        if REPO_ROOT.resolve() not in target_resolved.parents and target_resolved != REPO_ROOT.resolve():
-            add_dirs.add(str(target_resolved))
-
-        cmd = [claude_bin, "-p", "--agent", "web3-reconciler", "--model", self.opts.model]
-        for d in sorted(add_dirs):
-            cmd += ["--add-dir", d]
-        cmd += ["--output-format", "json", "--dangerously-skip-permissions", brief]
-
-        # Reconciler writes ```json``` fenced output to stdout; we extract.
-        result = self._run_streaming(cmd, "reconciler", expected_output_file=None)
+        result = self._run_claude_agent(
+            agent="web3-reconciler",
+            brief=brief,
+            stage_name="reconciler",
+            expected_output_file=None,
+        )
         if not result.ok:
             return result
 
-        wrapper_path = self.run_dir / "reconciler-stdout.log"
-        text = wrapper_path.read_text() if wrapper_path.exists() else ""
-        try:
-            wrapper = json.loads(text)
-            assistant_msg = wrapper.get("result", "") if isinstance(wrapper, dict) else ""
-        except json.JSONDecodeError:
-            assistant_msg = text
-
-        m = JSON_FENCE.search(assistant_msg)
+        # Reconciler writes the fenced JSON in its FINAL assistant message;
+        # _run_claude_stream stashes that in <stage>-final-message.txt.
+        final = self.run_dir / "reconciler-final-message.txt"
+        text = final.read_text() if final.exists() else ""
+        m = JSON_FENCE.search(text)
         if not m:
             _fail("reconciler returned no fenced JSON")
             return StageResult("reconciler", False, "no fenced json")
@@ -241,19 +248,22 @@ class Orchestrator:
         _ok(f"merged: {n} findings, {d} disagreements")
         return StageResult("reconciler", True, f"{n} findings")
 
-    def _run_streaming(
+    def _run_claude_stream(
         self,
         cmd: list[str],
         stage_name: str,
         expected_output_file: str | None,
     ) -> StageResult:
-        """Spawn a long-running command with a live spinner + activity tail."""
+        """Spawn `claude -p --output-format stream-json` and surface tool-uses
+        and assistant turns live as the agent works. Each JSONL event from
+        stdout is parsed; the spinner text shows the most recent meaningful
+        activity (tool call name, search query, file read, etc.).
+        """
         env = os.environ.copy()
-        # Persistent log
-        stdout_log = self.run_dir / f"{stage_name.replace('-', '-')}-stdout.log"
-        stderr_log = self.run_dir / f"{stage_name.replace('-', '-')}-stderr.log"
+        stdout_log = self.run_dir / f"{stage_name}-stdout.log"
+        stderr_log = self.run_dir / f"{stage_name}-stderr.log"
+        events_log = self.run_dir / f"{stage_name}-events.jsonl"
 
-        # Use Popen so we can poll stderr lines for status hints.
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -261,56 +271,138 @@ class Orchestrator:
             text=True,
             cwd=str(REPO_ROOT),
             env=env,
+            bufsize=1,
         )
 
-        out_chunks: list[str] = []
-        err_chunks: list[str] = []
-        latest_activity = ["(starting...)"]
+        out_lines: list[str] = []
+        err_lines: list[str] = []
+        events: list[dict] = []
+        latest_activity = ["(launching agent...)"]
+        # Per-event-type counts we expose in the spinner.
+        tool_counts: dict[str, int] = {}
+        final_assistant_text = [""]
 
-        def _drain(stream, sink: list[str], is_stderr: bool):
-            for line in stream:
-                sink.append(line)
-                if is_stderr and self.opts.verbose:
+        def _summarize_event(ev: dict) -> str | None:
+            """Return a human-readable one-liner for this event, or None to skip."""
+            etype = ev.get("type")
+            if etype == "system":
+                sub = ev.get("subtype", "")
+                if sub == "init":
+                    return "agent initialized"
+            elif etype == "assistant":
+                msg = ev.get("message") or {}
+                content = msg.get("content") or []
+                if not isinstance(content, list):
+                    return None
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    bt = block.get("type")
+                    if bt == "tool_use":
+                        name = block.get("name", "?")
+                        tool_counts[name] = tool_counts.get(name, 0) + 1
+                        inp = block.get("input") or {}
+                        # Best-effort short summary of the call args.
+                        if isinstance(inp, dict):
+                            if "query" in inp:
+                                arg = f'"{str(inp["query"])[:60]}"'
+                            elif "file_path" in inp:
+                                arg = Path(str(inp["file_path"])).name
+                            elif "pattern" in inp:
+                                arg = f'pattern={str(inp["pattern"])[:50]}'
+                            elif "entry_id" in inp:
+                                arg = str(inp["entry_id"])
+                            elif "command" in inp:
+                                arg = str(inp["command"])[:60]
+                            else:
+                                arg = ""
+                        else:
+                            arg = ""
+                        return f"tool {name}({arg})"
+                    if bt == "text":
+                        text = (block.get("text") or "").strip()
+                        if text:
+                            final_assistant_text[0] = text
+                            return f'…"{text[:80]}"'
+            elif etype == "user":
+                # Echoes of tool_result content arriving back to the agent.
+                msg = ev.get("message") or {}
+                content = msg.get("content") or []
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_result":
+                            return None  # too noisy; counts already incremented on tool_use
+            elif etype == "result":
+                # Final result envelope; contains cost + usage. We capture but
+                # don't surface as activity.
+                return None
+            return None
+
+        def _drain_stdout():
+            for line in proc.stdout:
+                out_lines.append(line)
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
+                try:
+                    ev = json.loads(line_stripped)
+                except json.JSONDecodeError:
+                    continue
+                events.append(ev)
+                summary = _summarize_event(ev)
+                if summary:
+                    latest_activity[0] = summary[:140]
+                # Save final assistant text whenever we see it.
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                err_lines.append(line)
+                if self.opts.verbose:
                     sys.stderr.write(line)
-                if line.strip():
-                    latest_activity[0] = line.strip()[:120]
 
-        t_out = threading.Thread(target=_drain, args=(proc.stdout, out_chunks, False), daemon=True)
-        t_err = threading.Thread(target=_drain, args=(proc.stderr, err_chunks, True), daemon=True)
+        t_out = threading.Thread(target=_drain_stdout, daemon=True)
+        t_err = threading.Thread(target=_drain_stderr, daemon=True)
         t_out.start()
         t_err.start()
 
-        spinner_text = f"running {stage_name}..."
         start = time.monotonic()
-        with console.status(f"[cyan]{spinner_text}[/cyan]", spinner="dots") as status:
+        with console.status(
+            f"[cyan]{stage_name} starting…[/cyan]", spinner="dots"
+        ) as status:
             while proc.poll() is None:
                 elapsed = int(time.monotonic() - start)
+                tc_str = " ".join(f"{n}{k[0].lower()}" for k, n in tool_counts.items()) or "—"
                 status.update(
-                    f"[cyan]{stage_name} · {elapsed}s elapsed[/cyan] "
-                    f"[dim]· last: {latest_activity[0]}[/dim]"
+                    f"[cyan]{stage_name} · {elapsed}s · tools[{tc_str}][/cyan] "
+                    f"[dim]· {latest_activity[0]}[/dim]"
                 )
-                time.sleep(0.4)
-        t_out.join(timeout=2)
-        t_err.join(timeout=2)
+                time.sleep(0.3)
+        t_out.join(timeout=3)
+        t_err.join(timeout=3)
 
-        stdout_log.write_text("".join(out_chunks))
-        stderr_log.write_text("".join(err_chunks))
+        stdout_log.write_text("".join(out_lines))
+        stderr_log.write_text("".join(err_lines))
+        events_log.write_text("\n".join(json.dumps(e) for e in events))
 
         rc = proc.returncode
         elapsed = int(time.monotonic() - start)
+
+        # Save the final assistant message separately so reconciler can fence-extract.
+        if final_assistant_text[0]:
+            (self.run_dir / f"{stage_name}-final-message.txt").write_text(final_assistant_text[0])
+
         if rc != 0:
             _fail(f"{stage_name} exited rc={rc} after {elapsed}s")
-            _info(f"see {stderr_log.relative_to(REPO_ROOT)}")
+            tail = "".join(err_lines)[-500:]
+            if tail.strip():
+                _info(f"stderr tail: {tail.strip()[:300]}")
+            _info(f"full logs: {stderr_log.relative_to(REPO_ROOT)} {events_log.relative_to(REPO_ROOT)}")
             return StageResult(stage_name, False, str(rc))
 
+        # If we expected a JSON file but the agent emitted it inline instead,
+        # extract from the final assistant message.
         if expected_output_file and not (self.run_dir / expected_output_file).exists():
-            # Try fenced-JSON extraction from stdout.
-            try:
-                wrapper = json.loads("".join(out_chunks))
-                msg = wrapper.get("result", "") if isinstance(wrapper, dict) else ""
-            except json.JSONDecodeError:
-                msg = "".join(out_chunks)
-            m = JSON_FENCE.search(msg)
+            m = JSON_FENCE.search(final_assistant_text[0])
             if m:
                 try:
                     payload = json.loads(m.group(1))
@@ -318,11 +410,19 @@ class Orchestrator:
                 except json.JSONDecodeError:
                     pass
 
+        # Surface tool-use summary so the user sees what was done.
+        if tool_counts:
+            tc_pretty = ", ".join(f"{n}× {k}" for k, n in sorted(tool_counts.items(), key=lambda x: -x[1]))
+            _info(f"tool use: {tc_pretty}")
+
         if expected_output_file:
             if (self.run_dir / expected_output_file).exists():
-                payload = json.loads((self.run_dir / expected_output_file).read_text())
-                n = len(payload.get("findings") or [])
-                _ok(f"{stage_name}: {n} findings emitted ({elapsed}s)")
+                try:
+                    payload = json.loads((self.run_dir / expected_output_file).read_text())
+                    n = len(payload.get("findings") or []) if isinstance(payload, dict) else 0
+                    _ok(f"{stage_name}: {n} findings emitted ({elapsed}s)")
+                except json.JSONDecodeError:
+                    _ok(f"{stage_name} complete ({elapsed}s) — output not parseable")
             else:
                 _fail(f"{stage_name}: no {expected_output_file} produced")
                 return StageResult(stage_name, False, "missing output file")
@@ -407,10 +507,19 @@ class Orchestrator:
         console.print(Panel(table, title=f"audit complete — {self.run_dir.name}", border_style="green"))
 
     def run_single(self) -> int:
-        total = 3
+        total = 2 if self.opts.dry_run else 3
         _stage_header("prep", 1, total)
         if not self._run_prep().ok:
             return 1
+        if self.opts.dry_run:
+            _stage_header("dry-run summary", 2, total)
+            _ok("prep completed; skipping auditor + finalize per --dry-run")
+            _info(
+                "outputs to inspect: "
+                f"{(self.run_dir / 'prep.json').relative_to(REPO_ROOT)}, "
+                f"{(self.run_dir / 'static-tools.json').relative_to(REPO_ROOT)}"
+            )
+            return 0
         _stage_header("claude-auditor", 2, total)
         if not self._run_claude_auditor().ok:
             return 1
@@ -421,10 +530,19 @@ class Orchestrator:
         return 0
 
     def run_multimodel(self) -> int:
-        total = 5
+        total = 2 if self.opts.dry_run else 5
         _stage_header("prep", 1, total)
         if not self._run_prep().ok:
             return 1
+        if self.opts.dry_run:
+            _stage_header("dry-run summary", 2, total)
+            _ok("prep completed; skipping auditors + reconciler + finalize per --dry-run")
+            _info(
+                "outputs to inspect: "
+                f"{(self.run_dir / 'prep.json').relative_to(REPO_ROOT)}, "
+                f"{(self.run_dir / 'static-tools.json').relative_to(REPO_ROOT)}"
+            )
+            return 0
 
         _stage_header("auditors (claude || codex in parallel)", 2, total)
         # Run both in parallel; both write their own output files.
