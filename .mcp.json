@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "web3sentinel-corpus": {
+      "command": "uv",
+      "args": ["run", "--quiet", "web3sentinel-mcp"],
+      "cwd": ".",
+      "env": {}
+    }
+  }
+}
