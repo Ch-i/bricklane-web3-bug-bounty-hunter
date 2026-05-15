@@ -32,6 +32,13 @@ Follow this sequence. Use the TodoWrite tool to track which step you are on.
 
 - Read the target source files (every .sol file in scope). Use `Glob` to enumerate them.
 - Read the static-analyzer JSON files provided in the prompt.
+- **Inspect the `foundry.coverage` field in the static-tools JSON.** If
+  present, it lists functions the project's own test suite does NOT
+  exercise (line-coverage + per-function hit counts). Uncovered functions
+  are coverage-guided audit priors — they're the highest-probability
+  bug locations because nobody has watched them run. If `coverage.status
+  == "ok"` and the function/line percentages are low, flag that in your
+  `notes` field too.
 - Call `corpus_stats` once to confirm the corpus is populated and to see which vuln_classes are well-represented.
 
 ### Step 2 — Identify protocol category

@@ -20,6 +20,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness.coverage import run_coverage
 from harness.schema import StaticToolFindings
 
 
@@ -285,11 +286,31 @@ def run_foundry(cfg: StaticToolsConfig) -> StaticToolFindings:
         return StaticToolFindings(tool="foundry", succeeded=False, output={}, error=str(e))
 
     build_ok = build.returncode == 0
-    payload = {
+    payload: dict = {
         "build_ok": build_ok,
         "stdout_tail": build.stdout[-2000:] if build.stdout else "",
         "stderr_tail": build.stderr[-2000:] if build.stderr else "",
     }
+
+    # Coverage-guided prior: if the project has tests, run forge coverage and
+    # surface uncovered functions as audit-priority hints. Failure is graceful
+    # — coverage is opportunistic, never blocking.
+    if build_ok:
+        report, msg = run_coverage(cfg.target)
+        if report is not None:
+            payload["coverage"] = {
+                "status": "ok",
+                "line_pct": round(report.line_pct, 2),
+                "function_pct": round(report.function_pct, 2),
+                "total_functions": report.total_functions,
+                "hit_functions": report.hit_functions,
+                "total_lines": report.total_lines,
+                "hit_lines": report.hit_lines,
+                # The auditor reads this list as a "go-hunt-here" prior.
+                "uncovered_functions": report.uncovered_functions()[:60],
+            }
+        else:
+            payload["coverage"] = {"status": "unavailable", "reason": msg}
 
     version = _capture_version([forge_bin, "--version"])
     return StaticToolFindings(
