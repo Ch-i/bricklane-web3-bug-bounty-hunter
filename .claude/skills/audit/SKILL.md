@@ -16,8 +16,10 @@ slash-command argument. Accept:
 
 - A path to a single `.sol` file
 - A path to a directory (Foundry project if it contains `foundry.toml`)
-
-Deployed-address mode (`/audit 0x...`) is not yet implemented (slice 7).
+- A `0x`-prefixed Ethereum / EVM address (with optional `--chain mainnet|optimism|polygon|arbitrum|base|sepolia`). Source is fetched
+  from Sourcify (no auth) with Etherscan v2 as a fallback (set
+  `ETHERSCAN_API_KEY` in `.env` if Sourcify misses). EIP-1967 proxies
+  are auto-detected — the implementation is fetched into `impl/`.
 
 ## Workflow
 

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from harness.citations import validate_findings
 from harness.corpus import REPO_ROOT
+from harness.onchain import ADDR_RE, fetch_verified_source, materialize_to_disk
 from harness.render import write_report
 from harness.schema import AuditReport, Finding, ModelDisagreement, StaticToolFindings
 from harness.static import StaticToolsConfig, run_all
@@ -35,28 +36,49 @@ from harness.static import StaticToolsConfig, run_all
 # ---------------------------------------------------------------------------
 
 
-def resolve_target(arg: str) -> tuple[Path, str]:
-    """Return (resolved_path, target_kind).
+def resolve_target(arg: str, *, chain: str = "mainnet") -> tuple[Path, str, dict]:
+    """Return (resolved_path, target_kind, target_metadata).
 
-    Slice 1 supports:
+    Supports:
+      * 0x-prefixed address (chain configurable) — fetched from Sourcify /
+        Etherscan, materialized to a temp dir, then treated like a directory
       * single .sol file
       * directory (foundry-project if foundry.toml present, else generic)
-      * Foundry/Hardhat project
-
-    Slice 7 will add: 0x-prefixed address with optional --chain.
     """
+    # Deployed address mode
+    if ADDR_RE.match(arg.strip()):
+        addr = arg.strip()
+        fetched = fetch_verified_source(addr, chain=chain)
+        # Materialize under audits/<slug>-source/ — kept beside the audit run
+        # for reproducibility. The actual run_dir is created later in cmd_prep.
+        slug = f"{addr[:10]}-{fetched.chain_id}"
+        target_dir = REPO_ROOT / "audits" / "onchain-source" / slug
+        materialize_to_disk(fetched, target_dir)
+        meta = {
+            "address": fetched.address,
+            "chain_id": fetched.chain_id,
+            "chain": chain,
+            "contract_name": fetched.name,
+            "compiler": fetched.compiler_version,
+            "source": fetched.fetched_via,
+            "is_proxy": fetched.is_proxy,
+            "implementation_address": fetched.implementation_address,
+            "materialized_at": str(target_dir),
+        }
+        return target_dir, "deployed-address", meta
+
     p = Path(arg).expanduser().resolve()
     if not p.exists():
         raise SystemExit(f"target does not exist: {p}")
 
     if p.is_file():
         if p.suffix == ".sol":
-            return p, "single-file"
+            return p, "single-file", {}
         raise SystemExit(f"target is a file but not .sol: {p}")
 
     if (p / "foundry.toml").exists():
-        return p, "foundry-project"
-    return p, "directory"
+        return p, "foundry-project", {}
+    return p, "directory", {}
 
 
 def slugify(s: str) -> str:
@@ -69,11 +91,14 @@ def slugify(s: str) -> str:
 
 
 def cmd_prep(args: argparse.Namespace) -> int:
-    target, kind = resolve_target(args.target)
+    target, kind, target_metadata = resolve_target(args.target, chain=args.chain)
     timestamp = datetime.now(timezone.utc).replace(microsecond=0)
     ts_str = timestamp.strftime("%Y%m%dT%H%M%SZ")
 
-    target_slug = slugify(target.name)
+    if kind == "deployed-address":
+        target_slug = f"{target_metadata['address'][:10]}-{target_metadata['chain']}"
+    else:
+        target_slug = slugify(target.name)
     run_dir = REPO_ROOT / "audits" / f"{target_slug}-{ts_str}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -119,6 +144,7 @@ def cmd_prep(args: argparse.Namespace) -> int:
         "run_dir": str(run_dir),
         "target": str(target),
         "target_kind": kind,
+        "target_metadata": target_metadata,
         "timestamp": timestamp.isoformat(),
         "static_tools_path": str(static_path),
         "static_tools_summary": [
@@ -262,6 +288,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    prep_meta = prep.get("target_metadata") or {}
+    prep_meta.setdefault("target_files_count", len(prep.get("target_files", [])))
+
     report = AuditReport(
         target=prep["target"],
         target_kind=prep["target_kind"],
@@ -271,7 +300,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         static_tools=static_tools,
         findings=check.valid,
         model_disagreements=model_disagreements,
-        target_metadata={"target_files_count": len(prep.get("target_files", []))},
+        target_metadata=prep_meta,
     )
     report_path = write_report(report, run_dir)
 
@@ -310,6 +339,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p_prep = sub.add_parser("prep", help="Resolve target, run static tools, write prep.json")
     p_prep.add_argument("target")
+    p_prep.add_argument(
+        "--chain",
+        default="mainnet",
+        help="Chain for deployed-address mode (mainnet | optimism | polygon | "
+        "arbitrum | base | sepolia | <chain-id>). Ignored for local targets.",
+    )
     p_prep.add_argument(
         "--scope",
         help="Restrict the auditor subagent's reading list to .sol files under "
