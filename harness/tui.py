@@ -472,9 +472,45 @@ def cmd_findings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_audit(args: argparse.Namespace) -> int:
+    from harness.orchestrator import Orchestrator, OrchestratorOptions
+
+    opts = OrchestratorOptions(
+        target=args.target,
+        chain=args.chain,
+        scope=args.scope,
+        model=args.model,
+        codex_model=args.codex_model,
+        codex_reasoning_effort=args.codex_effort,
+        deep=args.deep,
+        with_pocs=not args.no_pocs,
+        verbose=args.verbose,
+    )
+    orch = Orchestrator(opts)
+    if args.multimodel:
+        return orch.run_multimodel()
+    return orch.run_single()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_audit = sub.add_parser(
+        "audit",
+        help="Run an end-to-end audit with live progress (the user-facing entrypoint).",
+    )
+    p_audit.add_argument("target", help="Path to .sol / project dir, or 0x-address for on-chain.")
+    p_audit.add_argument("--chain", default="mainnet", help="Chain name for deployed-address mode.")
+    p_audit.add_argument("--scope", help="Restrict auditor reading to .sol files under this path.")
+    p_audit.add_argument("--multimodel", action="store_true", help="Run Claude + Codex in parallel then reconcile.")
+    p_audit.add_argument("--model", default="opus", help="Claude model.")
+    p_audit.add_argument("--codex-model", default="gpt-5.5")
+    p_audit.add_argument("--codex-effort", default="high", help="Codex reasoning effort.")
+    p_audit.add_argument("--deep", action="store_true", help="Also run Halmos/Mythril.")
+    p_audit.add_argument("--no-pocs", action="store_true", help="Skip PoC scaffolding + execution.")
+    p_audit.add_argument("--verbose", action="store_true", help="Stream subprocess stderr to terminal.")
+    p_audit.set_defaults(func=cmd_audit)
 
     p_list = sub.add_parser("list", help="Table of audit runs.")
     p_list.add_argument("--root", help="Override audits dir (default: ./audits).")
