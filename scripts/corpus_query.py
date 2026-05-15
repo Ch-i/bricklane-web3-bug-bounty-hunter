@@ -14,18 +14,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from harness import corpus
 
 
+def _env_exclude_ids() -> list[str]:
+    """IDs to filter out of every search, set by the eval driver.
+
+    Comma-separated. Empty/unset => no filtering. This is the mechanism that
+    prevents the auditor from cheating on eval entries by reading the
+    post-mortem of the bug it's supposed to find.
+    """
+    raw = os.environ.get("W3S_CORPUS_EXCLUDE_IDS", "").strip()
+    return [s.strip() for s in raw.split(",") if s.strip()] if raw else []
+
+
 def cmd_search(args: argparse.Namespace) -> int:
+    # Merge --exclude-id flags with env-driven exclusions (eval mode).
+    exclude_ids = list(args.exclude_id or []) + _env_exclude_ids()
     hits = corpus.search(
         query=args.query,
         vuln_class=args.vuln_class,
         severity=args.severity,
         source=args.source,
-        exclude_ids=args.exclude_id,
+        exclude_ids=exclude_ids or None,
         top_k=args.top_k,
     )
     print(

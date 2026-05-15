@@ -134,7 +134,7 @@ class AuditReport(BaseModel):
     """Final artifact written to ``audits/<target>-<ts>/report.md``."""
 
     target: str
-    target_kind: Literal["foundry-project", "single-file", "deployed-address"]
+    target_kind: Literal["foundry-project", "single-file", "directory", "deployed-address"]
     target_metadata: dict = Field(default_factory=dict)
     timestamp: datetime
     corpus_snapshot: str = Field(

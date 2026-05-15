@@ -13,6 +13,7 @@ Or as the installed entry point:
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -20,6 +21,13 @@ from mcp.server.fastmcp import FastMCP
 from harness import corpus as corpus_mod
 
 mcp = FastMCP("web3sentinel-corpus")
+
+
+def _env_exclude_ids() -> list[str]:
+    """Eval-mode exclusions, set by the eval driver before launching the MCP
+    server. Merged with the per-call ``exclude_ids`` argument."""
+    raw = os.environ.get("W3S_CORPUS_EXCLUDE_IDS", "").strip()
+    return [s.strip() for s in raw.split(",") if s.strip()] if raw else []
 
 
 @mcp.tool()
@@ -49,12 +57,13 @@ def search_corpus(
         List of {id, title, source, severity, snippet, score}.
         score is BM25; lower is more relevant in sqlite FTS5.
     """
+    merged_excludes = list(exclude_ids or []) + _env_exclude_ids()
     hits = corpus_mod.search(
         query=query,
         vuln_class=vuln_class,
         severity=severity,
         source=source,
-        exclude_ids=exclude_ids,
+        exclude_ids=merged_excludes or None,
         top_k=top_k,
     )
     return [
