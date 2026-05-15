@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version
+.pytest_cache/
+.ruff_cache/
+
+# Project data
+corpus.db
+corpus.db-journal
+corpus.db-wal
+corpus.db-shm
+.embed-cache/
+audits/*
+!audits/.gitkeep
+
+# Crawler state
+.crawler-state/
+*.cookies.json
+
+# Local secrets
+.env
+.env.local
+
+# Eval artifacts (kept in repo, but per-run traces gitignored)
+eval/runs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
