@@ -1,0 +1,81 @@
+name: corpus-ingest
+
+on:
+  schedule:
+    # Daily 04:17 UTC — arxiv (small + frequent enough that incremental
+    # daily pulls capture fresh papers without exhausting the API budget).
+    - cron: "17 4 * * *"
+    # Weekly Sunday 04:30 UTC — solodit + rekt (larger sources that change
+    # slowly; daily would mostly be duplicates).
+    - cron: "30 4 * * 0"
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: Comma-separated list of sources to run (arxiv,rekt,solodit). Empty = all.
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --extra mcp --extra static
+
+      - name: Decide which crawlers to run
+        id: which
+        run: |
+          # Manual dispatch can request a subset; scheduled runs derive from cron.
+          if [ -n "${{ github.event.inputs.sources }}" ]; then
+            echo "sources=${{ github.event.inputs.sources }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "17 4 * * *" ]; then
+            echo "sources=arxiv" >> "$GITHUB_OUTPUT"
+          else
+            echo "sources=arxiv,solodit,rekt" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Sources to run: ${{ steps.which.outputs.sources }}"
+
+      - name: Run arxiv crawler
+        if: contains(steps.which.outputs.sources, 'arxiv')
+        run: uv run python -m crawlers.arxiv --limit 200 --no-reindex
+
+      - name: Run rekt crawler
+        if: contains(steps.which.outputs.sources, 'rekt')
+        run: uv run python -m crawlers.rekt --no-reindex
+
+      - name: Run solodit crawler
+        if: contains(steps.which.outputs.sources, 'solodit')
+        run: uv run python -m crawlers.solodit --no-reindex
+
+      - name: Reindex sqlite (idempotent rebuild)
+        run: |
+          uv run python -c "from harness.corpus import reindex; r = reindex(); print(f'inserted={r.inserted} errors={len(r.errors)}')"
+
+      - name: Commit and push new corpus entries
+        run: |
+          git config user.name "web3sentinel-ingest"
+          git config user.email "research@cyberneticlandscapes.org"
+          git add corpus/
+          if git diff --cached --quiet; then
+            echo "No new corpus entries; nothing to commit."
+            exit 0
+          fi
+          DATE=$(date -u +%Y-%m-%d)
+          SUMMARY=$(git diff --cached --stat corpus/ | tail -1)
+          git commit -m "ingest: $DATE (${SUMMARY})"
+          git push
