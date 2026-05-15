@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from eval.driver import drive_audit
+from eval.driver import drive_audit, drive_audit_multimodel
 from eval.scoring import load_expected, load_findings, score_entry
 from harness.corpus import REPO_ROOT
 
@@ -26,7 +26,7 @@ def list_entries(root: Path) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_dir() and (p / "expected-finding.md").exists())
 
 
-def run_one(entry_dir: Path, model: str = "opus") -> dict:
+def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False) -> dict:
     expected_path = entry_dir / "expected-finding.md"
     expected = load_expected(expected_path)
 
@@ -35,11 +35,18 @@ def run_one(entry_dir: Path, model: str = "opus") -> dict:
         raise SystemExit(f"{entry_dir}: missing source/ directory")
 
     started = datetime.now(timezone.utc).isoformat()
-    drive = drive_audit(
-        target=source_dir,
-        exclude_ids=expected.exclude_corpus_ids,
-        model=model,
-    )
+    if multimodel:
+        drive = drive_audit_multimodel(
+            target=source_dir,
+            exclude_ids=expected.exclude_corpus_ids,
+            claude_model=model,
+        )
+    else:
+        drive = drive_audit(
+            target=source_dir,
+            exclude_ids=expected.exclude_corpus_ids,
+            model=model,
+        )
 
     # If drive_audit failed to produce findings, still record the attempt.
     if not (drive.run_dir / "findings.json").exists():
@@ -75,7 +82,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(DEFAULT_ROOT))
     parser.add_argument("--entry", help="Run only the named entry (directory name).")
-    parser.add_argument("--model", default="opus", help="Model for the auditor CLI.")
+    parser.add_argument("--model", default="opus", help="Model for the Claude auditor CLI.")
+    parser.add_argument(
+        "--multimodel",
+        action="store_true",
+        help="Run Claude + Codex auditors in parallel then reconcile. ~2x cost.",
+    )
     parser.add_argument(
         "--no-append",
         action="store_true",
@@ -97,12 +109,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no eval entries found under {root}", file=sys.stderr)
         return 1
 
-    print(f"Running {len(entries)} eval entries with model={args.model}…\n")
+    mode = "MULTIMODEL (claude+codex+reconciler)" if args.multimodel else "single-model (claude)"
+    print(f"Running {len(entries)} eval entries — mode={mode}, model={args.model}\n")
     rows = []
     for e in entries:
         print(f"=== {e.name} ===")
         try:
-            row = run_one(e, model=args.model)
+            row = run_one(e, model=args.model, multimodel=args.multimodel)
         except Exception as ex:  # noqa: BLE001
             row = {
                 "entry_id": e.name,

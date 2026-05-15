@@ -26,7 +26,7 @@ from pathlib import Path
 from harness.citations import validate_findings
 from harness.corpus import REPO_ROOT
 from harness.render import write_report
-from harness.schema import AuditReport, Finding, StaticToolFindings
+from harness.schema import AuditReport, Finding, ModelDisagreement, StaticToolFindings
 from harness.static import StaticToolsConfig, run_all
 
 
@@ -226,6 +226,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         if isinstance(findings_payload, dict) and "findings" in findings_payload
         else findings_payload
     )
+    raw_disagreements = (
+        findings_payload.get("model_disagreements", [])
+        if isinstance(findings_payload, dict)
+        else []
+    )
 
     findings: list[Finding] = []
     parse_errors: list[str] = []
@@ -234,6 +239,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             findings.append(Finding.model_validate(item))
         except Exception as e:  # noqa: BLE001
             parse_errors.append(f"finding[{i}]: {e}")
+
+    model_disagreements: list[ModelDisagreement] = []
+    for i, item in enumerate(raw_disagreements):
+        try:
+            model_disagreements.append(ModelDisagreement.model_validate(item))
+        except Exception as e:  # noqa: BLE001
+            parse_errors.append(f"disagreement[{i}]: {e}")
 
     check = validate_findings(findings)
 
@@ -258,6 +270,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         model_versions=model_versions,
         static_tools=static_tools,
         findings=check.valid,
+        model_disagreements=model_disagreements,
         target_metadata={"target_files_count": len(prep.get("target_files", []))},
     )
     report_path = write_report(report, run_dir)
