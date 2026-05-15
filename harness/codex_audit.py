@@ -53,6 +53,22 @@ OUTPUT_SCHEMA: dict = {
                     "impact": {"type": "string"},
                     "recommendation": {"type": "string"},
                     "proof_of_concept": {"type": ["string", "null"]},
+                    "foundry_poc": {
+                        "type": ["object", "null"],
+                        "properties": {
+                            "test_name": {"type": "string"},
+                            "setup": {"type": "string"},
+                            "exploit": {"type": "string"},
+                            "assertion": {"type": "string"},
+                            "imports": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "notes": {"type": ["string", "null"]},
+                        },
+                        "required": ["test_name", "setup", "exploit", "assertion", "imports", "notes"],
+                        "additionalProperties": False,
+                    },
                     "citations": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -75,6 +91,7 @@ OUTPUT_SCHEMA: dict = {
                     "impact",
                     "recommendation",
                     "proof_of_concept",
+                    "foundry_poc",
                     "citations",
                     "novel",
                     "confidence",
@@ -126,6 +143,22 @@ Your value is contributing a different model family's perspective.
 
 5. Set `"discovered_by": "codex"` on every finding (this distinguishes
    your output from the Claude auditor's in the reconciler).
+
+6. For Critical/High findings on a Foundry-shaped target, fill the
+   `foundry_poc` object with a structured proof of concept:
+       test_name:  must start with `test_`, valid Solidity identifier.
+       setup:      Solidity body for setUp() — deployments, deals, etc.
+       exploit:    Solidity body for the test function — the attack.
+       assertion:  Solidity assertion that PASSES if the bug exists
+                   (e.g. `assertGt(attacker.balance, 100 ether);`).
+       imports:    .sol paths the test needs.
+       notes:      any caveats (fork pinning, helper contracts, etc).
+   The harness scaffolds this into a `.t.sol` file, runs `forge test`,
+   and tags the finding `reproduced` / `unconfirmed` / `compile-error`.
+
+   If you can't write a faithful PoC, set `foundry_poc: null`. A fake
+   PoC that fails to compile is worse than no PoC. For Medium/Low/
+   Informational findings, `foundry_poc: null` is the default.
 
 # Workflow
 

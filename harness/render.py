@@ -25,6 +25,7 @@ REPORT_TEMPLATE = """\
 ## Summary
 
 {%- set counts = severity_counts(report.findings) %}
+{%- set pocs = poc_summary(report.findings) %}
 {%- if not report.findings %}
 No findings.
 {%- else %}
@@ -33,6 +34,16 @@ No findings.
 {%- for sev in ['Critical', 'High', 'Medium', 'Low', 'Informational', 'Gas'] %}
 {%- if counts.get(sev) %}
 | {{ sev }} | {{ counts[sev] }} |
+{%- endif %}
+{%- endfor %}
+
+### Dynamic confirmation status
+
+| PoC outcome | Count |
+| --- | ---: |
+{%- for status in ['reproduced', 'unconfirmed', 'compile-error', 'not-applicable', 'not-attempted'] %}
+{%- if pocs.get(status) %}
+| {{ poc_badge(status) }} | {{ pocs[status] }} |
 {%- endif %}
 {%- endfor %}
 
@@ -59,7 +70,7 @@ No findings.
 {%- endfor %}
 {%- endif %}
 
-**Discovered by:** {{ f.discovered_by }} &nbsp;|&nbsp; **Confidence:** {{ f.confidence }}
+**Discovered by:** {{ f.discovered_by }} &nbsp;|&nbsp; **Confidence:** {{ f.confidence }} &nbsp;|&nbsp; **PoC:** {{ poc_badge(f.poc_status) }}
 {%- if f.citations %} &nbsp;|&nbsp; **Citations:** {% for c in f.citations %}`{{ c }}`{% if not loop.last %}, {% endif %}{% endfor %}{%- endif %}
 
 #### Description
@@ -73,10 +84,24 @@ No findings.
 
 {%- if f.proof_of_concept %}
 
-#### Proof of concept
+#### Proof of concept (prose)
 ```
 {{ f.proof_of_concept }}
 ```
+{%- endif %}
+
+{%- if f.foundry_poc %}
+
+#### Foundry PoC
+
+Runnable test: `{{ f.poc_artifacts.get("test_path", "(not scaffolded)") }}`
+Status: **{{ f.poc_status }}**
+{%- if f.poc_artifacts.get("stdout_log") %} &nbsp;|&nbsp; stdout: `{{ f.poc_artifacts["stdout_log"] }}`{% endif %}
+{%- if f.poc_artifacts.get("stderr_log") %} &nbsp;|&nbsp; stderr: `{{ f.poc_artifacts["stderr_log"] }}`{% endif %}
+{%- if f.foundry_poc.notes %}
+
+> {{ f.foundry_poc.notes }}
+{%- endif %}
 {%- endif %}
 
 ---
@@ -110,6 +135,26 @@ def _severity_counts(findings) -> dict[str, int]:
     return counts
 
 
+_POC_BADGES = {
+    "reproduced": "✅ reproduced",
+    "unconfirmed": "❓ unconfirmed",
+    "compile-error": "⚠️ compile error",
+    "not-applicable": "— n/a",
+    "not-attempted": "— not attempted",
+}
+
+
+def _poc_badge(status: str) -> str:
+    return _POC_BADGES.get(status, status)
+
+
+def _poc_summary(findings) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for f in findings:
+        out[f.poc_status] = out.get(f.poc_status, 0) + 1
+    return out
+
+
 def render_markdown(report: AuditReport) -> str:
     env = Environment(
         loader=BaseLoader(),
@@ -118,6 +163,8 @@ def render_markdown(report: AuditReport) -> str:
         lstrip_blocks=False,
     )
     env.globals["severity_counts"] = _severity_counts
+    env.globals["poc_badge"] = _poc_badge
+    env.globals["poc_summary"] = _poc_summary
     template = env.from_string(REPORT_TEMPLATE)
     return template.render(report=report)
 

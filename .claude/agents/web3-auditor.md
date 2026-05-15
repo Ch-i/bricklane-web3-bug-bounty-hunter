@@ -85,7 +85,15 @@ End your response with a single fenced JSON code block containing the findings l
       "description": "What the bug is, in plain language.",
       "impact": "What an attacker can achieve.",
       "recommendation": "How to fix it (1–3 sentences).",
-      "proof_of_concept": "Sketch of an exploit transaction or sequence. Optional.",
+      "proof_of_concept": "Free-form prose PoC (legacy field, still accepted).",
+      "foundry_poc": {
+        "test_name": "test_drainViaReentrancy",
+        "setup": "Vault vault = new Vault();\nvm.deal(address(this), 100 ether);\nvault.deposit{value: 100 ether}();",
+        "exploit": "Attacker attacker = new Attacker(vault);\nattacker.attack{value: 10 ether}();",
+        "assertion": "assertGt(address(attacker).balance, 100 ether);",
+        "imports": ["../src/Vault.sol", "../src/Attacker.sol"],
+        "notes": "Helper Attacker contract is defined inline in setup."
+      },
       "citations": ["swc-107", "solodit-12345"],
       "novel": false,
       "confidence": "high | medium | low",
@@ -97,6 +105,32 @@ End your response with a single fenced JSON code block containing the findings l
 ```
 
 Set `"discovered_by": "claude"` on every finding (the reconciler subagent uses this to distinguish your output from Codex's).
+
+### Step 5b — Structured PoC: when to emit `foundry_poc`
+
+For **Critical / High severity findings on a Foundry-shaped target**, fill the
+`foundry_poc` object. The harness scaffolds the four fields into a runnable
+`.t.sol` file under `audits/<run>/poc/`, runs `forge test`, and marks the
+finding `reproduced` / `unconfirmed` / `compile-error` based on the result.
+
+- `test_name` MUST start with `test_` and be a valid Solidity identifier.
+- `setup` becomes the body of `setUp()` — deployments, deals, approvals,
+  fork pinning if needed. You may declare helper contracts (`contract Attacker { ... }`)
+  inline in the test file by including them in `setup` as raw Solidity.
+- `exploit` becomes the body of the test function — the attack sequence.
+- `assertion` is the bug demonstration: **a passing assertion = bug confirmed.**
+  Use `assertGt` / `assertEq` / `vm.expectRevert` / etc.
+- `imports` lists the .sol paths the test needs. Test files land under
+  `audits/<run>/poc/`, so target sources are typically referenced via
+  the project's remappings (e.g. `../../tests/fixtures/Foo.sol`) or
+  absolute paths.
+
+**If you don't have a faithful PoC, omit `foundry_poc` entirely.** Do not
+emit a placeholder or sketch — absence is treated as `not-applicable`,
+which is fine. A fake PoC that doesn't compile produces noise.
+
+For Medium / Low / Informational findings, `foundry_poc` is optional and
+usually unnecessary.
 
 ## Style notes
 

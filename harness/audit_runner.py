@@ -26,6 +26,7 @@ from pathlib import Path
 from harness.citations import validate_findings
 from harness.corpus import REPO_ROOT
 from harness.onchain import ADDR_RE, fetch_verified_source, materialize_to_disk
+from harness.poc import attempt_all as attempt_all_pocs
 from harness.render import write_report
 from harness.schema import AuditReport, Finding, ModelDisagreement, StaticToolFindings
 from harness.static import StaticToolsConfig, run_all
@@ -275,6 +276,14 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
     check = validate_findings(findings)
 
+    # Dynamic-harness pass: scaffold + execute each finding's structured PoC
+    # against the target's Foundry project. Mutates `check.valid` in place.
+    if getattr(args, "with_pocs", True):
+        project_root = Path(prep["target"])
+        if project_root.is_file():
+            project_root = project_root.parent
+        attempt_all_pocs(check.valid, run_dir=run_dir, project_root=project_root)
+
     static_tools_raw = json.loads((run_dir / "static-tools.json").read_text())
     static_tools = [StaticToolFindings.model_validate(t) for t in static_tools_raw]
 
@@ -357,7 +366,13 @@ def main(argv: list[str] | None = None) -> int:
     p_fin = sub.add_parser("finalize", help="Render report.md from findings JSON")
     p_fin.add_argument("run_dir")
     p_fin.add_argument("--findings", required=True, help="Path to findings JSON from auditor")
-    p_fin.set_defaults(func=cmd_finalize)
+    p_fin.add_argument(
+        "--no-pocs",
+        dest="with_pocs",
+        action="store_false",
+        help="Skip PoC scaffolding + execution (faster, no dynamic confirmation).",
+    )
+    p_fin.set_defaults(func=cmd_finalize, with_pocs=True)
 
     args = parser.parse_args(argv)
     return args.func(args)

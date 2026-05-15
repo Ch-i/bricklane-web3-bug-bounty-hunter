@@ -73,6 +73,50 @@ class FindingLocation(BaseModel):
     line_end: int | None = None
 
 
+class FoundryPoc(BaseModel):
+    """Structured-enough proof-of-concept that we can generate a runnable
+    Foundry test file from it. The auditor fills the four bodies with
+    Solidity-like code (or pseudocode that closely resembles Solidity);
+    the PoC scaffolder wraps them with `forge-std/Test.sol` boilerplate.
+
+    The point: turn `proof_of_concept` prose into AFL-crash-file-style
+    reproducible artifacts that anyone can run with `forge test`. A
+    failing test on the buggy code is the demonstration that the bug
+    exists.
+    """
+
+    test_name: str = Field(
+        ...,
+        description="Function name for the test, e.g. 'test_drainViaReentrancy'. "
+        "Must start with 'test_' to be picked up by forge.",
+    )
+    setup: str = Field(
+        ...,
+        description="Solidity / pseudocode body for the test's setUp() function "
+        "— initial state, deployments, deals, approvals.",
+    )
+    exploit: str = Field(
+        ...,
+        description="Solidity / pseudocode body for the test function — the "
+        "actual attack sequence (calls, transfers, etc).",
+    )
+    assertion: str = Field(
+        ...,
+        description="Solidity body asserting the bug manifested — e.g. "
+        "'assertGt(attacker.balance, 100 ether)' or 'vm.expectRevert(); ...'. "
+        "A passing assertion = bug confirmed.",
+    )
+    imports: list[str] = Field(
+        default_factory=list,
+        description="Extra imports needed, e.g. ['../src/Foo.sol', "
+        "'@openzeppelin/contracts/token/ERC20/IERC20.sol'].",
+    )
+    notes: str | None = Field(
+        default=None,
+        description="Caveats: 'requires fork at block N', 'assumes attacker funded', etc.",
+    )
+
+
 class Finding(BaseModel):
     """One vulnerability surfaced by an audit pass.
 
@@ -87,7 +131,14 @@ class Finding(BaseModel):
     description: str
     impact: str
     recommendation: str
-    proof_of_concept: str | None = None
+    proof_of_concept: str | None = Field(
+        default=None,
+        description="Free-form prose PoC (legacy, also accepted by the schema).",
+    )
+    foundry_poc: FoundryPoc | None = Field(
+        default=None,
+        description="Structured PoC suitable for auto-generating a runnable Foundry test.",
+    )
     citations: list[str] = Field(
         default_factory=list,
         description="Corpus entry IDs that informed this finding.",
@@ -98,6 +149,13 @@ class Finding(BaseModel):
     )
     confidence: Confidence = "medium"
     discovered_by: DiscoveredBy = "claude"
+    # Populated post-finalize by the PoC executor; lets the report render a
+    # "reproducible / unconfirmed / not-applicable" badge per finding.
+    poc_status: Literal["not-attempted", "reproduced", "unconfirmed", "compile-error", "not-applicable"] = "not-attempted"
+    poc_artifacts: dict[str, str] = Field(
+        default_factory=dict,
+        description="Paths to runnable artifacts: {test_path, stdout_log, stderr_log, ...}",
+    )
 
     @model_validator(mode="after")
     def _require_citation_or_novel(self) -> Finding:
