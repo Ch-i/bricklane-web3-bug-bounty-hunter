@@ -66,6 +66,7 @@ class EvalResult(BaseModel):
     timestamp: str
     run_dir: str
     corpus_snapshot: str
+    mode: Literal["single", "multimodel"] = "single"
 
     matched_findings: list[dict] = Field(default_factory=list)
     """Each: {finding_title, severity, matched_keywords, location_hit}."""

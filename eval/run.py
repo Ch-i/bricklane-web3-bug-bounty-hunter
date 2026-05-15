@@ -68,6 +68,7 @@ def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False) -> d
     corpus_sha = prep.get("corpus_snapshot", "untracked")
 
     result = score_entry(expected, findings, drive.run_dir, corpus_sha)
+    result.mode = "multimodel" if multimodel else "single"
     return result.model_dump()
 
 
