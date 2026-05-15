@@ -56,6 +56,7 @@ dev = [
 web3sentinel-mcp = "mcp_server.server:main"
 web3sentinel-ingest = "scripts.ingest_md:main"
 web3sentinel-seed-swc = "scripts.seed_swc:main"
+w3s = "harness.tui:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["harness", "crawlers", "mcp_server", "scripts"]
