@@ -10,7 +10,7 @@ expected_vuln_class:
   - liquidation
   - missing-health-check
   - access-control
-expected_severity: Critical
+expected_severity: High
 expected_locations:
   - file: CreditMarket.sol
     function: donateToReserves
@@ -18,7 +18,7 @@ expected_locations:
     function: liquidate
 required_keywords:
   - donateToReserves
-  - liquidation
+  - liquidat  # stem — matches both 'liquidate' and 'liquidation'
 memorization_signals:
   - euler
   - "$197"

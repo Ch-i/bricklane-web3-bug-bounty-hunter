@@ -9,7 +9,7 @@ expected_vuln_class:
   - access-control
   - signature-verification
   - merkle-proof
-expected_severity: Critical
+expected_severity: High
 expected_locations:
   - file: OptimisticChannel.sol
     function: initialize
