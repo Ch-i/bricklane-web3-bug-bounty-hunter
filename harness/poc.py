@@ -97,6 +97,13 @@ def scaffold_poc(
 ) -> ScaffoldResult | None:
     """Write the PoC to ``out_dir/<contract>.t.sol``. Returns None if the
     finding has no structured foundry_poc.
+
+    The PoC body is whatever the auditor emitted in ``foundry_poc.{setup,
+    exploit, assertion}``. The auditor's imports typically assume the test
+    file is located at the foundry project's standard ``test/`` directory
+    (so ``../../src/Foo.sol`` resolves correctly). If you want forge to
+    pick up the test, write into ``<project_root>/test/<subdir>/`` —
+    ``scaffold_poc_into_project()`` is the convenience wrapper for that.
     """
     if not finding.foundry_poc:
         return None
@@ -106,7 +113,15 @@ def scaffold_poc(
     poc: FoundryPoc = finding.foundry_poc
     contract_name = _sanitize_contract_name(f"{finding.title}-{finding_index}")
     test_name = _normalize_test_name(poc.test_name)
-    imports_block = "\n".join(f'import "{imp}";' for imp in poc.imports) if poc.imports else ""
+    # Dedupe imports against forge-std/Test.sol (template already imports it).
+    seen: set[str] = {"forge-std/Test.sol"}
+    extra_imports: list[str] = []
+    for imp in poc.imports or []:
+        if imp in seen:
+            continue
+        seen.add(imp)
+        extra_imports.append(imp)
+    imports_block = "\n".join(f'import "{i}";' for i in extra_imports)
 
     content = POC_FILE_TEMPLATE.format(
         finding_title=finding.title.replace('"', "'"),
@@ -123,6 +138,11 @@ def scaffold_poc(
     out_path = out_dir / f"{contract_name}.t.sol"
     out_path.write_text(content)
     return ScaffoldResult(out_path, contract_name, test_name)
+
+
+# Subdirectory under the target project's test/ dir where we drop generated
+# PoCs. Namespaced to avoid colliding with the project's own tests.
+W3S_POC_TEST_DIR = "__web3sentinel_pocs__"
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +271,19 @@ def execute_poc(
 # ---------------------------------------------------------------------------
 
 
+def _poc_test_dir(project_root: Path) -> Path | None:
+    """Where to drop generated PoCs so forge picks them up.
+
+    For Foundry projects this is ``<project>/test/__web3sentinel_pocs__/``.
+    The auditor's emitted imports typically assume the test file lives at
+    a project-internal ``test/`` location (so ``../../src/Foo.sol`` resolves),
+    so this convention matters for the test to actually compile.
+    """
+    if not (project_root / "foundry.toml").exists():
+        return None
+    return project_root / "test" / W3S_POC_TEST_DIR
+
+
 def attempt_all(
     findings: list[Finding],
     *,
@@ -266,40 +299,57 @@ def attempt_all(
     ``progress(idx, total, finding, phase)`` is called for status changes:
     phase ∈ {"scaffolding", "running", "done:<status>", "skipped"}.
     """
-    poc_dir = run_dir / "poc"
+    canonical_dir = run_dir / "poc"
+    inproject_dir = _poc_test_dir(project_root)
     total = len(findings)
+
     for i, f in enumerate(findings):
         if not f.foundry_poc:
             f.poc_status = "not-applicable"
             if progress:
                 progress(i, total, f, "skipped")
             continue
+
         if progress:
             progress(i, total, f, "scaffolding")
-        scaffold = scaffold_poc(f, out_dir=poc_dir, finding_index=i)
+
+        # Write the canonical artifact path under audits/<run>/poc/ so the
+        # report can link to it. This is purely for human inspection.
+        scaffold = scaffold_poc(f, out_dir=canonical_dir, finding_index=i)
         if not scaffold:
             f.poc_status = "not-applicable"
             if progress:
                 progress(i, total, f, "skipped")
             continue
 
+        # If the target is a Foundry project, also drop a copy under
+        # <project>/test/__web3sentinel_pocs__/ so forge can locate +
+        # compile it with the project's existing remappings.
+        project_test_path: Path | None = None
+        if inproject_dir is not None:
+            inproject_dir.mkdir(parents=True, exist_ok=True)
+            project_test_path = inproject_dir / scaffold.test_path.name
+            project_test_path.write_text(scaffold.test_path.read_text())
+
+        run_path = project_test_path or scaffold.test_path
         if progress:
             progress(i, total, f, "running")
         exec_result = execute_poc(
-            scaffold.test_path,
+            run_path,
             scaffold.contract_name,
             scaffold.test_name,
             project_root=project_root,
         )
         f.poc_status = exec_result.status
-        stdout_log = poc_dir / f"{scaffold.contract_name}.stdout.log"
-        stderr_log = poc_dir / f"{scaffold.contract_name}.stderr.log"
+        stdout_log = canonical_dir / f"{scaffold.contract_name}.stdout.log"
+        stderr_log = canonical_dir / f"{scaffold.contract_name}.stderr.log"
         stdout_log.write_text(exec_result.stdout)
         stderr_log.write_text(exec_result.stderr)
         f.poc_artifacts = {
             "test_path": str(scaffold.test_path.relative_to(REPO_ROOT))
             if scaffold.test_path.is_relative_to(REPO_ROOT)
             else str(scaffold.test_path),
+            "run_path": str(run_path),
             "stdout_log": str(stdout_log.relative_to(REPO_ROOT))
             if stdout_log.is_relative_to(REPO_ROOT)
             else str(stdout_log),
