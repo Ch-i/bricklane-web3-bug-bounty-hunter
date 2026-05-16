@@ -542,6 +542,35 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0 if result.rc == 0 else 1
 
 
+def cmd_synthesize(args: argparse.Namespace) -> int:
+    from harness.synthesize import synthesize
+
+    console.print(
+        f"[cyan]Synthesizing[/cyan] [bold]{args.topic}[/bold]  "
+        f"[dim](this spawns claude-synthesizer headlessly, ~3-5 min, ~$1-2)[/dim]"
+    )
+    try:
+        result = synthesize(
+            topic=args.topic,
+            seed_query=args.seed_query,
+            slug=args.slug,
+            model=args.model,
+            reindex_after=not args.no_reindex,
+            timeout_seconds=args.timeout,
+        )
+    except FileNotFoundError as e:
+        console.print(f"[red]{e}[/red]")
+        return 1
+    if result.error:
+        console.print(f"[yellow]warning:[/yellow] {result.error}")
+    console.print(
+        f"\n[green]synthesis note written[/green]: {result.note_path}"
+    )
+    if result.derives_count is not None:
+        console.print(f"derives_from: {result.derives_count} corpus entries")
+    return 1 if result.error else 0
+
+
 def cmd_corpus(args: argparse.Namespace) -> int:
     from harness import corpus as corpus_mod
 
@@ -707,6 +736,18 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--chain", default="mainnet")
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
+
+    p_syn = sub.add_parser(
+        "synthesize",
+        help="Distill a cluster of corpus entries on TOPIC into one dense synthesis note.",
+    )
+    p_syn.add_argument("topic", help='e.g. "flash loan oracle manipulation"')
+    p_syn.add_argument("--seed-query", help="Override corpus search query (defaults to topic).")
+    p_syn.add_argument("--slug", help="Override filename slug.")
+    p_syn.add_argument("--model", default="opus")
+    p_syn.add_argument("--no-reindex", action="store_true")
+    p_syn.add_argument("--timeout", type=int, default=1800)
+    p_syn.set_defaults(func=cmd_synthesize)
 
     p_corpus = sub.add_parser("corpus", help="Browse the corpus (search / read / stats).")
     corpus_sub = p_corpus.add_subparsers(dest="corpus_cmd", required=True)
