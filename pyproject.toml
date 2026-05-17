@@ -32,6 +32,14 @@ embed = [
     "sentence-transformers>=3.0",
     "torch>=2.2",
 ]
+# Jupyter + analysis stack for notebooks/blockchain-explorer.ipynb
+notebook = [
+    "jupyter>=1.0",
+    "ipykernel>=6.29",
+    "pandas>=2.2",
+    "networkx>=3.3",
+    "matplotlib>=3.8",
+]
 # MCP server runtime.
 mcp = [
     "mcp[cli]>=1.2",
