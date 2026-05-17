@@ -434,6 +434,122 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_overview(args: argparse.Namespace) -> int:
+    """At-a-glance dashboard: corpus + queue + recent audits + submissions."""
+    from harness import candidates as cand_store
+    from harness import corpus as corpus_mod
+    from harness import submissions as sub_mod
+
+    # Corpus stats
+    try:
+        c_stats = corpus_mod.stats()
+        corpus_table = Table(show_header=False, box=None)
+        corpus_table.add_column(style="cyan")
+        corpus_table.add_column()
+        corpus_table.add_row("total entries", str(c_stats["total"]))
+        sources = ", ".join(f"{k}={v}" for k, v in sorted(c_stats["by_source"].items()))
+        corpus_table.add_row("by source", sources)
+        synth_n = c_stats["by_source"].get("synthesis", 0)
+        corpus_table.add_row("synthesis notes", str(synth_n))
+        console.print(Panel(corpus_table, title="Corpus", border_style="cyan"))
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[dim]corpus stats unavailable: {e}[/dim]")
+
+    # Candidate queue
+    try:
+        queue = cand_store.query_queue(limit=10)
+        all_cands = cand_store.load_all()
+        by_status = {}
+        by_platform = {}
+        for c in all_cands:
+            by_status[c.triage_status] = by_status.get(c.triage_status, 0) + 1
+            by_platform[c.platform] = by_platform.get(c.platform, 0) + 1
+        cand_table = Table(show_header=False, box=None)
+        cand_table.add_column(style="cyan")
+        cand_table.add_column()
+        cand_table.add_row("total candidates", str(len(all_cands)))
+        cand_table.add_row("by platform", ", ".join(f"{k}={v}" for k, v in sorted(by_platform.items())))
+        cand_table.add_row("by status", ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())))
+        cand_table.add_row("top in queue", str(len([c for c in queue if c.triage_score])))
+        console.print(Panel(cand_table, title="Candidate queue", border_style="cyan"))
+
+        if queue and any(c.triage_score for c in queue):
+            top_table = Table(title="Top 10 by Stage 1 score", show_lines=False)
+            top_table.add_column("Score", justify="right", style="bold")
+            top_table.add_column("ID", style="cyan")
+            top_table.add_column("Platform", style="dim")
+            top_table.add_column("Rationale")
+            for c in queue:
+                if c.triage_score:
+                    color = "green" if c.triage_score >= 7 else ("yellow" if c.triage_score >= 4 else "dim")
+                    top_table.add_row(
+                        Text(f"{c.triage_score:.0f}", style=color),
+                        c.id, c.platform,
+                        (c.triage_rationale or "")[:80],
+                    )
+            console.print(top_table)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[dim]queue stats unavailable: {e}[/dim]")
+
+    # Recent audits
+    try:
+        audits_root = REPO_ROOT / "audits"
+        if audits_root.exists():
+            runs = sorted(
+                (p for p in audits_root.iterdir() if p.is_dir() and (p / "prep.json").exists()),
+                key=lambda p: p.stat().st_mtime, reverse=True,
+            )[:5]
+            audit_table = Table(title="Recent audits", show_lines=False)
+            audit_table.add_column("Run", style="cyan")
+            audit_table.add_column("Target", max_width=40)
+            audit_table.add_column("Findings", justify="right")
+            audit_table.add_column("Has PoCs", justify="center")
+            for r in runs:
+                try:
+                    import json as _json
+                    prep = _json.loads((r / "prep.json").read_text())
+                    n = 0
+                    has_poc = False
+                    if (r / "findings.json").exists():
+                        fs = _json.loads((r / "findings.json").read_text())
+                        fs_list = fs if isinstance(fs, list) else fs.get("findings", [])
+                        n = len(fs_list)
+                        has_poc = any(f.get("poc_status") == "reproduced" for f in fs_list)
+                    audit_table.add_row(
+                        r.name[:40],
+                        str(prep.get("target", ""))[-40:],
+                        str(n),
+                        "✓" if has_poc else "—",
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+            console.print(audit_table)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[dim]audits unavailable: {e}[/dim]")
+
+    # Submissions
+    try:
+        log = sub_mod.load_log()
+        if log:
+            by_outcome = {}
+            total_paid = 0
+            for r in log:
+                by_outcome[r.outcome] = by_outcome.get(r.outcome, 0) + 1
+                if r.payout_usd:
+                    total_paid += r.payout_usd
+            sub_table = Table(show_header=False, box=None)
+            sub_table.add_column(style="cyan")
+            sub_table.add_column()
+            sub_table.add_row("total submissions", str(len(log)))
+            sub_table.add_row("by outcome", ", ".join(f"{k}={v}" for k, v in sorted(by_outcome.items())))
+            sub_table.add_row("payout accrued", f"${total_paid:,}")
+            console.print(Panel(sub_table, title="Submissions", border_style="cyan"))
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[dim]submissions unavailable: {e}[/dim]")
+
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -689,8 +805,15 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     )
 
     if not args.no_stage1 and new:
-        console.print(f"\n[cyan]→ Stage 1 ranking {len(new)} new candidate(s) (model={args.model})[/cyan]")
-        for cand in new:
+        to_rank = new
+        if args.max_new and len(to_rank) > args.max_new:
+            console.print(
+                f"[yellow]Capping Stage 1 ranking at {args.max_new} of {len(new)} new candidates "
+                f"(--max-new). Remaining stay status=new, rank them later with `w3s queue --status new`.[/yellow]"
+            )
+            to_rank = new[: args.max_new]
+        console.print(f"\n[cyan]→ Stage 1 ranking {len(to_rank)} new candidate(s) (model={args.model})[/cyan]")
+        for cand in to_rank:
             if not cand.local_path or not Path(cand.local_path).exists():
                 console.print(f"  [dim]skip {cand.id}: no local source[/dim]")
                 continue
@@ -944,6 +1067,12 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
 
+    p_over = sub.add_parser(
+        "overview",
+        help="At-a-glance dashboard: corpus + candidate queue + recent audits + submissions.",
+    )
+    p_over.set_defaults(func=cmd_overview)
+
     p_dd = sub.add_parser(
         "deep-dive",
         help="Exhaustively analyze ONE target: every function gets its own Opus pass.",
@@ -971,6 +1100,8 @@ def main(argv: list[str] | None = None) -> int:
     p_sweep.add_argument("--cache", help="Where to clone repos (default .cache/sweep/).")
     p_sweep.add_argument("--no-clone", action="store_true", help="Skip cloning; register Candidates only.")
     p_sweep.add_argument("--no-stage1", action="store_true", help="Skip the Opus ranking pass.")
+    p_sweep.add_argument("--max-new", type=int, default=30,
+                         help="Cap how many newly-discovered candidates get Stage-1 ranked per sweep (cost guard).")
     p_sweep.add_argument("--model", default="opus", help="Stage-1 model.")
     p_sweep.set_defaults(func=cmd_sweep)
 
