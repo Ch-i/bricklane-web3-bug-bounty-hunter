@@ -768,6 +768,30 @@ def cmd_deep_dive(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scrutinize(args: argparse.Namespace) -> int:
+    """Maximum-depth pipeline: audit + deep-dive + materialize-pocs + filter on one target."""
+    from harness import scrutinize
+
+    out_dir = Path(args.out).expanduser().resolve() if args.out else None
+    scrutinize.scrutinize(
+        args.target,
+        chain=args.chain,
+        scope=args.scope,
+        out_dir=out_dir,
+        skip_audit=args.skip_audit,
+        skip_deep_dive=args.skip_deep_dive,
+        skip_cross_fn=args.skip_cross_fn,
+        skip_materialize=args.skip_materialize,
+        skip_filter=args.skip_filter,
+        audit_multimodel=not args.single_model,
+        audit_with_pocs=not args.no_audit_pocs,
+        deep_dive_max_functions=args.max_functions,
+        materialize_min_severity=args.materialize_min_severity,
+        model=args.model,
+    )
+    return 0
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Run all enabled platform ingestors, write Candidates, optionally Stage-1 rank."""
     from crawlers import c4_contests, sherlock_audits, cantina_audits, immunefi_programs
@@ -1150,6 +1174,29 @@ def main(argv: list[str] | None = None) -> int:
     p_submit.add_argument("--min-severity", default="Medium")
     p_submit.add_argument("--only-reproduced", action="store_true")
     p_submit.set_defaults(func=cmd_submit)
+
+    p_scr = sub.add_parser(
+        "scrutinize",
+        help="Maximum-depth pipeline: audit + deep-dive + materialize-pocs + filter on one target.",
+    )
+    p_scr.add_argument("target", help="Path to .sol / project dir, or 0x-address for on-chain.")
+    p_scr.add_argument("--chain", default="mainnet")
+    p_scr.add_argument("--scope")
+    p_scr.add_argument("--out", help="Override scrutinize run dir.")
+    p_scr.add_argument("--skip-audit", action="store_true")
+    p_scr.add_argument("--skip-deep-dive", action="store_true")
+    p_scr.add_argument("--skip-cross-fn", action="store_true")
+    p_scr.add_argument("--skip-materialize", action="store_true")
+    p_scr.add_argument("--skip-filter", action="store_true")
+    p_scr.add_argument("--single-model", action="store_true",
+                       help="Audit phase uses single model only (skip codex + reconciler).")
+    p_scr.add_argument("--no-audit-pocs", action="store_true",
+                       help="Skip foundry_poc scaffolding in the audit phase (deep-dive still does).")
+    p_scr.add_argument("--max-functions", type=int, default=None)
+    p_scr.add_argument("--materialize-min-severity", default="High",
+                       choices=["Critical", "High", "Medium"])
+    p_scr.add_argument("--model", default="opus")
+    p_scr.set_defaults(func=cmd_scrutinize)
 
     p_syn = sub.add_parser(
         "synthesize",
