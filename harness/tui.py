@@ -632,7 +632,7 @@ def cmd_deep_dive(args: argparse.Namespace) -> int:
 
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Run all enabled platform ingestors, write Candidates, optionally Stage-1 rank."""
-    from crawlers import c4_contests
+    from crawlers import c4_contests, sherlock_audits, cantina_audits, immunefi_programs
     from harness import candidates as cand_store
     from harness import stage1
 
@@ -641,11 +641,43 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
     if "c4" in args.platforms:
         console.print(f"[cyan]→ fetching Code4rena active contests...[/cyan]")
-        c4 = c4_contests.fetch_active_candidates(clone_cache=None if args.no_clone else cache_root / "c4")
+        try:
+            c4 = c4_contests.fetch_active_candidates(clone_cache=None if args.no_clone else cache_root / "c4")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"  [red]C4 fetch failed: {e}[/red]")
+            c4 = []
         console.print(f"  {len(c4)} contest(s)")
         sourced.extend(c4)
 
-    # (Sherlock / Cantina / Immunefi ingestors land in v2; their slots here.)
+    if "sherlock" in args.platforms:
+        console.print(f"[cyan]→ fetching Sherlock active audits...[/cyan]")
+        try:
+            sh = sherlock_audits.fetch_active_candidates(clone_cache=None if args.no_clone else cache_root / "sherlock")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"  [red]Sherlock fetch failed: {e}[/red]")
+            sh = []
+        console.print(f"  {len(sh)} audit(s)")
+        sourced.extend(sh)
+
+    if "cantina" in args.platforms:
+        console.print(f"[cyan]→ fetching Cantina active competitions...[/cyan]")
+        try:
+            ca = cantina_audits.fetch_active_candidates(clone_cache=None if args.no_clone else cache_root / "cantina")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"  [red]Cantina fetch failed: {e}[/red]")
+            ca = []
+        console.print(f"  {len(ca)} competition(s)")
+        sourced.extend(ca)
+
+    if "immunefi" in args.platforms:
+        console.print(f"[cyan]→ fetching Immunefi active programs...[/cyan]")
+        try:
+            im = immunefi_programs.fetch_active_candidates()
+        except Exception as e:  # noqa: BLE001
+            console.print(f"  [red]Immunefi fetch failed: {e}[/red]")
+            im = []
+        console.print(f"  {len(im)} program(s)")
+        sourced.extend(im)
 
     new, changed = cand_store.diff_against_log(sourced)
     if new or changed:

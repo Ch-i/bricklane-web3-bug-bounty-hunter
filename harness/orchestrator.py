@@ -145,6 +145,31 @@ class Orchestrator:
         return StageResult("prep", True, str(self.run_dir))
 
     # --- claude auditor ------------------------------------------------
+    def _stage1_suspects_block(self) -> str:
+        """If the target is a known candidate with Stage 1 results, surface its
+        top_suspects so the auditor focuses there first (slice 11 v1)."""
+        try:
+            from harness import candidates as cand_store
+            cand = cand_store.find_by_local_path(self.prep_meta["target"])
+        except Exception:  # noqa: BLE001
+            return ""
+        if not cand or not cand.triage_top_suspects:
+            return ""
+        suspects_md = "\n".join(
+            f"  - `{s.get('file', '?')}::{s.get('function', '?')}` — {s.get('why', '')}"
+            for s in cand.triage_top_suspects
+        )
+        rationale = cand.triage_rationale or "(no rationale)"
+        return (
+            f"\n\nSTAGE-1 PRIOR ANALYSIS — these surfaces were pre-flagged by "
+            f"an Opus pre-screen (score={cand.triage_score}/10):\n"
+            f"  rationale: {rationale}\n"
+            f"  suspects:\n{suspects_md}\n\n"
+            f"Start your hunt at these surfaces but DO NOT be limited to them. "
+            f"If you find that one of these is a false positive, say so in your "
+            f"notes; if you find a bug elsewhere, that's still a valid finding."
+        )
+
     def _claude_brief(self) -> str:
         target_files = "\n".join(f"- {f}" for f in self.prep_meta["target_files"])
         return (
@@ -154,7 +179,8 @@ class Orchestrator:
             f"RUN DIR: {self.prep_meta['run_dir']}\n\n"
             f"SOURCE FILES TO AUDIT (read each one):\n{target_files}\n\n"
             f"STATIC ANALYZER RESULTS: {self.prep_meta['static_tools_path']}\n"
-            f"(read this file with Read to see Slither / Aderyn / Foundry output)\n\n"
+            f"(read this file with Read to see Slither / Aderyn / Foundry output)"
+            f"{self._stage1_suspects_block()}\n\n"
             f"Follow the workflow in your system prompt. Search the corpus to "
             f"ground your findings. Write the final JSON findings list to "
             f"{self.prep_meta['run_dir']}/auditor-output.json -- do NOT just paste it "

@@ -220,6 +220,25 @@ def reindex() -> int:
         return n
 
 
+def find_by_local_path(path: Path | str) -> Candidate | None:
+    """Look up a candidate whose `local_path` matches the given path.
+
+    Used by the orchestrator to auto-attach Stage 1 suspects to an audit
+    brief when the user runs `w3s audit <local-path>` against a candidate
+    that's already been swept + ranked.
+    """
+    target = str(Path(path).expanduser().resolve())
+    for c in load_all():
+        if not c.local_path:
+            continue
+        try:
+            if str(Path(c.local_path).expanduser().resolve()) == target:
+                return c
+        except OSError:
+            continue
+    return None
+
+
 def query_queue(
     *,
     platform: Platform | None = None,
