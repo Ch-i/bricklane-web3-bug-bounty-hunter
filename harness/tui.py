@@ -571,6 +571,65 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
     return 1 if result.error else 0
 
 
+def cmd_deep_dive(args: argparse.Namespace) -> int:
+    """Exhaustively analyze ONE target — every function gets its own Opus call."""
+    from harness import deep_dive
+
+    target = Path(args.target).expanduser().resolve()
+    scope = Path(args.scope).expanduser().resolve() if args.scope else None
+    out_dir = Path(args.out).expanduser().resolve() if args.out else None
+
+    # Quick decomposition preview so the user sees scale before LLM spend
+    units = deep_dive.decompose(target, scope=scope)
+    if args.max_functions:
+        units = units[: args.max_functions]
+    console.print(
+        f"[cyan]Decomposed[/cyan] target into [bold]{len(units)}[/bold] functions. "
+        f"Will spend ~{len(units)} Opus messages per-fn, plus up to {args.max_cross_pairs} cross-fn."
+    )
+    if args.dry_run:
+        # Print the decomposition only
+        for u in units[:30]:
+            dangers = ", ".join(f"{k}={v}" for k, v in u.danger_grep.items() if v)
+            console.print(
+                f"  [{u.visibility:>10}/{u.mutability:>10}] {u.fn_id}  "
+                f"lines={u.line_start}-{u.line_end}  dangers=[{dangers}]"
+            )
+        if len(units) > 30:
+            console.print(f"  ... and {len(units) - 30} more")
+        return 0
+
+    started = time.monotonic()
+
+    def progress(phase, idx, total, msg):
+        elapsed = int(time.monotonic() - started)
+        color = "cyan" if "cached" not in msg else "dim"
+        console.print(f"[{color}][{phase} {idx + 1}/{total} · {elapsed}s][/{color}] {msg}")
+
+    report_path = deep_dive.run_deep_dive(
+        target,
+        out_dir=out_dir,
+        scope=scope,
+        model=args.model,
+        max_functions=args.max_functions,
+        skip_cross=args.skip_cross,
+        max_cross_pairs=args.max_cross_pairs,
+        progress_callback=progress,
+        resume=not args.no_resume,
+    )
+
+    elapsed = int(time.monotonic() - started)
+    console.print()
+    console.print(
+        Panel(
+            f"Report: {report_path}\nTime: {elapsed}s ({elapsed // 60}m {elapsed % 60}s)",
+            title="deep-dive complete",
+            border_style="green",
+        )
+    )
+    return 0
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Run all enabled platform ingestors, write Candidates, optionally Stage-1 rank."""
     from crawlers import c4_contests
@@ -852,6 +911,25 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--chain", default="mainnet")
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
+
+    p_dd = sub.add_parser(
+        "deep-dive",
+        help="Exhaustively analyze ONE target: every function gets its own Opus pass.",
+    )
+    p_dd.add_argument("target", help="Path to a Solidity project (or single file).")
+    p_dd.add_argument("--scope", help="Restrict to .sol files under this subpath.")
+    p_dd.add_argument("--out", help="Output dir (default: audits/deep-dive-<name>-<ts>).")
+    p_dd.add_argument("--model", default="opus")
+    p_dd.add_argument("--max-functions", type=int, default=None,
+                      help="Cap the per-function pass (useful for cost-bounded runs).")
+    p_dd.add_argument("--skip-cross", action="store_true",
+                      help="Skip the cross-function pair-wise analysis.")
+    p_dd.add_argument("--max-cross-pairs", type=int, default=30)
+    p_dd.add_argument("--no-resume", action="store_true",
+                      help="Ignore prior state; start fresh.")
+    p_dd.add_argument("--dry-run", action="store_true",
+                      help="Decompose + print function list only; no LLM calls.")
+    p_dd.set_defaults(func=cmd_deep_dive)
 
     p_sweep = sub.add_parser(
         "sweep",
