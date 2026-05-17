@@ -691,8 +691,11 @@ def cmd_deep_dive(args: argparse.Namespace) -> int:
     """Exhaustively analyze ONE target — every function gets its own Opus call."""
     from harness import deep_dive
 
-    target = Path(args.target).expanduser().resolve()
-    scope = Path(args.scope).expanduser().resolve() if args.scope else None
+    target_str, scope_str = _resolve_target_args(args)
+    if not target_str:
+        raise SystemExit("provide a target path or --from-candidate")
+    target = Path(target_str).expanduser().resolve()
+    scope = Path(scope_str).expanduser().resolve() if scope_str else None
     out_dir = Path(args.out).expanduser().resolve() if args.out else None
 
     # Quick decomposition preview so the user sees scale before LLM spend
@@ -768,15 +771,41 @@ def cmd_deep_dive(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_candidate_target(candidate_id: str) -> tuple[str, str | None]:
+    """Look up a candidate by id, return (target_path, scope_subpath_or_None)."""
+    from harness import candidates as cand_store
+
+    cand = cand_store.get(candidate_id)
+    if not cand:
+        raise SystemExit(f"candidate {candidate_id!r} not found in queue")
+    if not cand.local_path:
+        raise SystemExit(
+            f"candidate {candidate_id!r} has no local_path — run `w3s sweep` "
+            f"or clone manually first."
+        )
+    # If scope_paths is set, use the first as the scope hint
+    scope = cand.scope_paths[0] if cand.scope_paths else None
+    return cand.local_path, scope
+
+
 def cmd_scrutinize(args: argparse.Namespace) -> int:
     """Maximum-depth pipeline: audit + deep-dive + materialize-pocs + filter on one target."""
     from harness import scrutinize
 
+    target = args.target
+    scope = args.scope
+    if getattr(args, "from_candidate", None):
+        target, cand_scope = _resolve_candidate_target(args.from_candidate)
+        if scope is None and cand_scope:
+            scope = cand_scope
+        console.print(f"[cyan]Resolved candidate[/cyan] {args.from_candidate} → {target}"
+                      + (f" (scope: {scope})" if scope else ""))
+
     out_dir = Path(args.out).expanduser().resolve() if args.out else None
     scrutinize.scrutinize(
-        args.target,
+        target,
         chain=args.chain,
-        scope=args.scope,
+        scope=scope,
         out_dir=out_dir,
         skip_audit=args.skip_audit,
         skip_deep_dive=args.skip_deep_dive,
@@ -790,6 +819,19 @@ def cmd_scrutinize(args: argparse.Namespace) -> int:
         model=args.model,
     )
     return 0
+
+
+def _resolve_target_args(args: argparse.Namespace) -> tuple[str, str | None]:
+    """For cmd_deep_dive: resolve --from-candidate → (target, scope)."""
+    target = args.target
+    scope = args.scope
+    if getattr(args, "from_candidate", None):
+        target, cand_scope = _resolve_candidate_target(args.from_candidate)
+        if scope is None and cand_scope:
+            scope = cand_scope
+        console.print(f"[cyan]Resolved candidate[/cyan] {args.from_candidate} → {target}"
+                      + (f" (scope: {scope})" if scope else ""))
+    return target, scope
 
 
 def cmd_sweep(args: argparse.Namespace) -> int:
@@ -1123,7 +1165,10 @@ def main(argv: list[str] | None = None) -> int:
         "deep-dive",
         help="Exhaustively analyze ONE target: every function gets its own Opus pass.",
     )
-    p_dd.add_argument("target", help="Path to a Solidity project (or single file).")
+    p_dd.add_argument("target", nargs="?",
+                      help="Path to a Solidity project (or single file). Omit if using --from-candidate.")
+    p_dd.add_argument("--from-candidate", help="Candidate id from `w3s queue` (resolves "
+                                                "to its local_path + scope automatically).")
     p_dd.add_argument("--scope", help="Restrict to .sol files under this subpath.")
     p_dd.add_argument("--out", help="Output dir (default: audits/deep-dive-<name>-<ts>).")
     p_dd.add_argument("--model", default="opus")
@@ -1179,7 +1224,11 @@ def main(argv: list[str] | None = None) -> int:
         "scrutinize",
         help="Maximum-depth pipeline: audit + deep-dive + materialize-pocs + filter on one target.",
     )
-    p_scr.add_argument("target", help="Path to .sol / project dir, or 0x-address for on-chain.")
+    p_scr.add_argument("target", nargs="?",
+                       help="Path to .sol / project dir, or 0x-address. "
+                            "Omit if using --from-candidate.")
+    p_scr.add_argument("--from-candidate", help="Candidate id from `w3s queue` (resolves "
+                                                 "to its local_path + scope automatically).")
     p_scr.add_argument("--chain", default="mainnet")
     p_scr.add_argument("--scope")
     p_scr.add_argument("--out", help="Override scrutinize run dir.")
