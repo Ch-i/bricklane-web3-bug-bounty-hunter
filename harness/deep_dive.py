@@ -147,8 +147,8 @@ reentry path).
 
 
 _FN_RE = re.compile(
-    r"(?ms)\b(function|receive|fallback|constructor)\b(?:\s+(\w+))?\s*"
-    r"\(([^)]*)\)([^{]*?)(\{)"
+    r"(?ms)\b(function|receive|fallback|constructor|modifier)\b(?:\s+(\w+))?\s*"
+    r"(?:\(([^)]*)\))?([^{]*?)(\{)"
 )
 _CONTRACT_RE = re.compile(
     r"^(\s*)(?:abstract\s+)?(contract|library|interface)\s+(\w+)",

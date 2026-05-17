@@ -113,6 +113,65 @@ contract Risky {
     assert by["auth"].danger_grep.get("tx.origin", 0) >= 1
 
 
+def test_decompose_extracts_modifiers(tmp_path):
+    """Modifiers contain critical access-control logic — must be analyzed too."""
+    src = '''
+contract Auth {
+    address public owner;
+    mapping(address => bool) admins;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
+
+    modifier onlyAdmin(uint256 role) {
+        require(admins[msg.sender], "no role");
+        require(role > 0);
+        _;
+    }
+
+    modifier nonReentrant {
+        _;
+    }
+
+    function setOwner(address x) external onlyOwner {
+        owner = x;
+    }
+}
+'''
+    p = _write(tmp_path, "Auth.sol", src)
+    units = decompose_file(p, tmp_path)
+    names = {u.name for u in units}
+    # Modifier definitions must be discovered
+    assert "onlyOwner" in names, f"missing onlyOwner; got {names}"
+    assert "onlyAdmin" in names
+    assert "nonReentrant" in names, "modifier without parens must still be found"
+    assert "setOwner" in names
+
+    # And modifiers should be tied to the right contract
+    by = {u.name: u for u in units}
+    assert by["onlyOwner"].contract == "Auth"
+    assert by["nonReentrant"].contract == "Auth"
+
+
+def test_decompose_modifier_body_captures_require(tmp_path):
+    """The source slice for a modifier must include its require checks."""
+    src = '''
+contract X {
+    address owner;
+    modifier onlyOwner() {
+        require(msg.sender == owner, "denied");
+        _;
+    }
+}
+'''
+    p = _write(tmp_path, "X.sol", src)
+    units = decompose_file(p, tmp_path)
+    by = {u.name: u for u in units}
+    assert "require(msg.sender == owner" in by["onlyOwner"].source
+
+
 def test_function_analysis_max_severity():
     a = FunctionAnalysis(
         function_id="x",
