@@ -802,6 +802,8 @@ def cmd_scrutinize(args: argparse.Namespace) -> int:
                       + (f" (scope: {scope})" if scope else ""))
 
     out_dir = Path(args.out).expanduser().resolve() if args.out else None
+    if not target:
+        raise SystemExit("provide a target path or --from-candidate")
     scrutinize.scrutinize(
         target,
         chain=args.chain,
@@ -817,6 +819,7 @@ def cmd_scrutinize(args: argparse.Namespace) -> int:
         deep_dive_max_functions=args.max_functions,
         materialize_min_severity=args.materialize_min_severity,
         model=args.model,
+        dry_run=args.dry_run,
     )
     return 0
 
@@ -1245,6 +1248,9 @@ def main(argv: list[str] | None = None) -> int:
     p_scr.add_argument("--materialize-min-severity", default="High",
                        choices=["Critical", "High", "Medium"])
     p_scr.add_argument("--model", default="opus")
+    p_scr.add_argument("--dry-run", action="store_true",
+                       help="Print decomposition + estimated LLM message budget + wall time, "
+                            "without spending anything. Run this first to size up cost.")
     p_scr.set_defaults(func=cmd_scrutinize)
 
     p_syn = sub.add_parser(

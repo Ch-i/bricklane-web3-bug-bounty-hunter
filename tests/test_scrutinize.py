@@ -202,6 +202,87 @@ def test_cli_flag_routing(tmp_path: Path, monkeypatch):
     assert captured["skip_filter"] is False
 
 
+def test_estimate_plan_scales_with_function_count(tmp_path: Path):
+    """The estimator should report function/pair counts and a total message budget."""
+    # Build a small Solidity project so decompose() finds N functions
+    src = '''
+contract Vault {
+    uint256 public x;
+    function deposit() external payable { x += msg.value; }
+    function withdraw(uint a) external { x -= a; payable(msg.sender).transfer(a); }
+    function emergencyShutdown() external {}
+    modifier onlyOwner() { require(msg.sender == address(0)); _; }
+}
+'''
+    target = tmp_path / "src" / "Vault.sol"
+    target.parent.mkdir()
+    target.write_text(src)
+    # decompose() needs a project root - point at tmp_path
+    plan = scrutinize.estimate_plan(
+        tmp_path, scope=None,
+        skip_audit=False, skip_deep_dive=False, skip_cross_fn=False,
+        skip_materialize=False, skip_filter=False,
+        audit_multimodel=True, audit_with_pocs=True,
+        deep_dive_max_functions=None,
+    )
+    assert plan["function_count"] == 4  # deposit, withdraw, emergencyShutdown, onlyOwner
+    assert plan["messages"]["deep_dive_per_fn"] == 4
+    assert plan["messages"]["audit"] >= 3  # multimodel + pocs
+    assert plan["messages"]["total"] > plan["messages"]["audit"]  # other phases contribute
+    assert plan["wall_time_estimate_s"][0] < plan["wall_time_estimate_s"][1]
+
+
+def test_estimate_plan_respects_skips(tmp_path: Path):
+    """Skipping audit + deep-dive should produce a near-zero budget."""
+    target = tmp_path / "Vault.sol"
+    target.write_text("contract V { function f() external {} }")
+    plan = scrutinize.estimate_plan(
+        tmp_path, scope=None,
+        skip_audit=True, skip_deep_dive=True, skip_cross_fn=True,
+        skip_materialize=True, skip_filter=True,
+        audit_multimodel=True, audit_with_pocs=True,
+        deep_dive_max_functions=None,
+    )
+    assert plan["messages"]["total"] == 0
+    assert plan["messages"]["audit"] == 0
+    assert plan["messages"]["deep_dive_per_fn"] == 0
+
+
+def test_estimate_plan_caps_at_max_functions(tmp_path: Path):
+    """deep_dive_max_functions should cap the per-fn budget."""
+    parts = ["contract C {"]
+    for i in range(20):
+        parts.append(f"    function f{i}() external {{}}")
+    parts.append("}")
+    (tmp_path / "C.sol").write_text("\n".join(parts))
+    plan = scrutinize.estimate_plan(
+        tmp_path, scope=None,
+        skip_audit=True, skip_deep_dive=False, skip_cross_fn=True,
+        skip_materialize=True, skip_filter=True,
+        audit_multimodel=False, audit_with_pocs=False,
+        deep_dive_max_functions=5,
+    )
+    assert plan["function_count"] == 5
+    assert plan["messages"]["deep_dive_per_fn"] == 5
+
+
+def test_dry_run_returns_none_and_doesnt_create_dir(tmp_path: Path, monkeypatch):
+    target = tmp_path / "Foo.sol"
+    target.write_text("contract F { function f() external {} }")
+    # Patch the orchestrator + deep_dive so a non-dry-run would fail loudly if hit
+    called = {"hit": False}
+    monkeypatch.setattr(scrutinize, "Orchestrator", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("dry-run hit Orchestrator")))
+    monkeypatch.setattr(scrutinize.deep_dive, "run_deep_dive", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("dry-run hit run_deep_dive")))
+
+    result = scrutinize.scrutinize(str(tmp_path), dry_run=True)
+    assert result is None
+    # Should not have created an audits/ dir
+    audits = (scrutinize.REPO_ROOT / "audits")
+    new_dirs = [d for d in audits.iterdir() if d.is_dir() and "scrutinize-" in d.name and target.parent.name in d.name]
+    # The dry-run path shouldn't create a run dir at all
+    assert called["hit"] is False
+
+
 def test_cli_defaults_to_full_pipeline():
     """`w3s scrutinize <target>` with no flags should enable every phase."""
     captured: dict = {}

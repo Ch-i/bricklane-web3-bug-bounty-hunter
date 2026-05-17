@@ -200,6 +200,104 @@ def _master_report(
     return out_path
 
 
+def estimate_plan(
+    target_path: Path,
+    scope: str | None,
+    *,
+    skip_audit: bool,
+    skip_deep_dive: bool,
+    skip_cross_fn: bool,
+    skip_materialize: bool,
+    skip_filter: bool,
+    audit_multimodel: bool,
+    audit_with_pocs: bool,
+    deep_dive_max_functions: int | None,
+) -> dict:
+    """Decompose the target + estimate message count + wall time.
+
+    Returns a dict suitable for human inspection or budget gating.
+    """
+    units = deep_dive.decompose(
+        target_path,
+        scope=Path(scope).resolve() if scope else None,
+    ) if target_path.exists() else []
+    if deep_dive_max_functions:
+        units = units[:deep_dive_max_functions]
+
+    n_fn = len(units)
+    n_pairs = min(30, n_fn * (n_fn - 1) // 2)  # cap matches default max_cross_pairs
+
+    audit_msgs = 0
+    if not skip_audit:
+        audit_msgs = 3 if audit_multimodel else 1  # claude + codex + reconciler vs single
+        if audit_with_pocs:
+            audit_msgs += 2  # PoC scaffolding pass
+
+    dd_msgs = 0 if skip_deep_dive else n_fn
+    cross_msgs = 0 if (skip_deep_dive or skip_cross_fn) else n_pairs
+    mat_msgs = 0
+    if not skip_materialize and not skip_deep_dive:
+        # rough: 1 per High/Critical candidate; assume ~25% of functions have one
+        mat_msgs = max(1, n_fn // 4)
+    filter_msgs = 0
+    if not skip_filter and not skip_audit:
+        filter_msgs = max(2, audit_msgs * 2)  # ~one per finding; audit findings count
+
+    total = audit_msgs + dd_msgs + cross_msgs + mat_msgs + filter_msgs
+
+    # Rough wall-time estimate: Opus messages average 40-90s on Pro Max
+    wall_s_low = total * 40
+    wall_s_high = total * 90
+
+    return {
+        "function_count": n_fn,
+        "pair_count": n_pairs,
+        "messages": {
+            "audit": audit_msgs,
+            "deep_dive_per_fn": dd_msgs,
+            "deep_dive_cross_fn": cross_msgs,
+            "materialize": mat_msgs,
+            "filter": filter_msgs,
+            "total": total,
+        },
+        "wall_time_estimate_s": (wall_s_low, wall_s_high),
+        "functions_preview": [
+            {"id": u.fn_id, "vis": u.visibility, "lines": u.line_end - u.line_start + 1}
+            for u in units[:25]
+        ],
+    }
+
+
+def _print_plan(plan: dict) -> None:
+    """Pretty-print the estimate_plan output for --dry-run."""
+    n = plan["function_count"]
+    p = plan["pair_count"]
+    msgs = plan["messages"]
+    lo, hi = plan["wall_time_estimate_s"]
+    body = (
+        f"Functions to analyze:    {n}\n"
+        f"Cross-fn pairs:          {p}\n"
+        f"\n"
+        f"LLM message budget:\n"
+        f"  audit:                 {msgs['audit']}\n"
+        f"  deep-dive per-fn:      {msgs['deep_dive_per_fn']}\n"
+        f"  deep-dive cross-fn:    {msgs['deep_dive_cross_fn']}\n"
+        f"  materialize-pocs:      {msgs['materialize']}\n"
+        f"  filter:                {msgs['filter']}\n"
+        f"  ──────────────\n"
+        f"  TOTAL:                 {msgs['total']}\n"
+        f"\n"
+        f"Wall time estimate: {lo // 60}–{hi // 60} min  ({lo}–{hi}s)\n"
+    )
+    console.print(Panel(body, title="scrutinize dry-run plan", border_style="cyan"))
+    if plan["functions_preview"]:
+        console.print("\n[cyan]First functions (preview):[/cyan]")
+        for f in plan["functions_preview"]:
+            console.print(f"  [dim]{f['vis']:>10}[/dim]  {f['id']}  [dim]({f['lines']}L)[/dim]")
+        if n > len(plan["functions_preview"]):
+            console.print(f"  ... and {n - len(plan['functions_preview'])} more")
+
+
 def scrutinize(
     target: str,
     *,
@@ -216,8 +314,24 @@ def scrutinize(
     deep_dive_max_functions: int | None = None,
     materialize_min_severity: str = "High",
     model: str = "opus",
-) -> Path:
-    """Run the maximum-depth pipeline on one target. Returns master report path."""
+    dry_run: bool = False,
+) -> Path | None:
+    """Run the maximum-depth pipeline on one target. Returns master report path
+    (or None for dry-run)."""
+    target_path = Path(target).expanduser().resolve()
+
+    if dry_run:
+        plan = estimate_plan(
+            target_path, scope,
+            skip_audit=skip_audit, skip_deep_dive=skip_deep_dive,
+            skip_cross_fn=skip_cross_fn, skip_materialize=skip_materialize,
+            skip_filter=skip_filter, audit_multimodel=audit_multimodel,
+            audit_with_pocs=audit_with_pocs,
+            deep_dive_max_functions=deep_dive_max_functions,
+        )
+        _print_plan(plan)
+        return None
+
     started = time.monotonic()
 
     target_path = Path(target).expanduser().resolve()
@@ -373,6 +487,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--materialize-min-severity", default="High",
                         choices=["Critical", "High", "Medium"])
     parser.add_argument("--model", default="opus")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print the decomposition + estimated message + wall-time budget. "
+                             "No LLM calls. Use this to preview cost before committing.")
     args = parser.parse_args(argv)
 
     out_dir = Path(args.out).expanduser().resolve() if args.out else None
@@ -392,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         deep_dive_max_functions=args.max_functions,
         materialize_min_severity=args.materialize_min_severity,
         model=args.model,
+        dry_run=args.dry_run,
     )
     return 0
 
