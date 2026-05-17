@@ -571,6 +571,122 @@ def cmd_synthesize(args: argparse.Namespace) -> int:
     return 1 if result.error else 0
 
 
+def cmd_sweep(args: argparse.Namespace) -> int:
+    """Run all enabled platform ingestors, write Candidates, optionally Stage-1 rank."""
+    from crawlers import c4_contests
+    from harness import candidates as cand_store
+    from harness import stage1
+
+    cache_root = Path(args.cache or (REPO_ROOT / ".cache" / "sweep"))
+    sourced: list = []
+
+    if "c4" in args.platforms:
+        console.print(f"[cyan]→ fetching Code4rena active contests...[/cyan]")
+        c4 = c4_contests.fetch_active_candidates(clone_cache=None if args.no_clone else cache_root / "c4")
+        console.print(f"  {len(c4)} contest(s)")
+        sourced.extend(c4)
+
+    # (Sherlock / Cantina / Immunefi ingestors land in v2; their slots here.)
+
+    new, changed = cand_store.diff_against_log(sourced)
+    if new or changed:
+        cand_store.append(new + changed)
+        cand_store.reindex()
+    console.print(
+        f"[green]Sweep complete:[/green] {len(sourced)} active, "
+        f"{len(new)} new, {len(changed)} changed in queue."
+    )
+
+    if not args.no_stage1 and new:
+        console.print(f"\n[cyan]→ Stage 1 ranking {len(new)} new candidate(s) (model={args.model})[/cyan]")
+        for cand in new:
+            if not cand.local_path or not Path(cand.local_path).exists():
+                console.print(f"  [dim]skip {cand.id}: no local source[/dim]")
+                continue
+            with console.status(f"[cyan]ranking {cand.id}...[/cyan]", spinner="dots"):
+                result = stage1.rank_candidate(cand, Path(cand.local_path), model=args.model)
+            stage1.apply_to_candidate(cand, result)
+            cand_store.upsert(cand)
+            score_str = f"[bold]{result.score}/10[/bold]"
+            color = "green" if result.score >= 7 else ("yellow" if result.score >= 4 else "dim")
+            console.print(f"  [{color}]{score_str}[/{color}] {cand.id}  ::  {result.rationale[:100]}")
+        cand_store.reindex()
+
+    return 0
+
+
+def cmd_queue(args: argparse.Namespace) -> int:
+    """Show the ranked candidate queue."""
+    from harness import candidates as cand_store
+
+    queue = cand_store.query_queue(
+        platform=args.platform,
+        status=args.status,
+        min_score=args.min_score,
+        limit=args.limit,
+    )
+
+    table = Table(title=f"Candidate queue ({len(queue)} of top {args.limit})", show_lines=False)
+    table.add_column("Score", justify="right", style="bold")
+    table.add_column("ID", style="cyan")
+    table.add_column("Platform", style="dim")
+    table.add_column("Status", style="dim")
+    table.add_column("Payout", justify="right")
+    table.add_column("Closes")
+    table.add_column("Rationale")
+    for c in queue:
+        score = f"{c.triage_score:.0f}" if c.triage_score is not None else "—"
+        color = "green" if (c.triage_score or 0) >= 7 else ("yellow" if (c.triage_score or 0) >= 4 else "dim")
+        payout = f"${c.payout_max_usd:,}" if c.payout_max_usd else "—"
+        closes = (c.closes_at or "—")[:16]
+        rat = (c.triage_rationale or "—")[:90]
+        table.add_row(Text(score, style=color), c.id, c.platform, c.triage_status, payout, closes, rat)
+    console.print(table)
+
+    if args.detail and queue:
+        for c in queue[: args.detail]:
+            console.print()
+            console.print(Rule(c.id, style="cyan"))
+            if c.triage_top_suspects:
+                console.print("[bold]Top suspects:[/bold]")
+                for s in c.triage_top_suspects:
+                    console.print(f"  • {s.get('file')}::{s.get('function')}  --  {s.get('why')}")
+            if c.triage_skip_reasons:
+                console.print("[bold yellow]Skip reasons:[/bold yellow]")
+                for r in c.triage_skip_reasons:
+                    console.print(f"  • {r}")
+            if c.local_path:
+                console.print(f"[dim]local source: {c.local_path}[/dim]")
+            if c.repo_url:
+                console.print(f"[dim]repo: {c.repo_url}[/dim]")
+    return 0
+
+
+def cmd_submit(args: argparse.Namespace) -> int:
+    """Emit per-platform submission templates for a completed audit run."""
+    from harness.submissions import export_run
+
+    run_dir = Path(args.run_dir)
+    if not run_dir.exists():
+        cand = REPO_ROOT / "audits" / args.run_dir
+        if cand.exists():
+            run_dir = cand
+        else:
+            console.print(f"[red]no run dir {args.run_dir}[/red]")
+            return 1
+    records = export_run(
+        run_dir,
+        candidate_id=args.candidate_id,
+        platforms=args.platforms,
+        min_severity=args.min_severity,
+        only_reproduced=args.only_reproduced,
+    )
+    console.print(f"[green]Exported {len(records)} submission template(s):[/green]")
+    for r in records:
+        console.print(f"  [{r.finding_severity}] {r.platform}  ::  {r.template_path}")
+    return 0
+
+
 def cmd_corpus(args: argparse.Namespace) -> int:
     from harness import corpus as corpus_mod
 
@@ -736,6 +852,36 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--chain", default="mainnet")
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
+
+    p_sweep = sub.add_parser(
+        "sweep",
+        help="Bounty-hunt daily sweep: ingest active contests + Stage-1 rank new candidates.",
+    )
+    p_sweep.add_argument("--platforms", nargs="+", default=["c4"], help="Platforms to ingest.")
+    p_sweep.add_argument("--cache", help="Where to clone repos (default .cache/sweep/).")
+    p_sweep.add_argument("--no-clone", action="store_true", help="Skip cloning; register Candidates only.")
+    p_sweep.add_argument("--no-stage1", action="store_true", help="Skip the Opus ranking pass.")
+    p_sweep.add_argument("--model", default="opus", help="Stage-1 model.")
+    p_sweep.set_defaults(func=cmd_sweep)
+
+    p_queue = sub.add_parser("queue", help="Show ranked candidate queue.")
+    p_queue.add_argument("--platform", help="Filter to one platform.")
+    p_queue.add_argument("--status", help="Filter to one triage_status.")
+    p_queue.add_argument("--min-score", type=float, default=None)
+    p_queue.add_argument("--limit", type=int, default=30)
+    p_queue.add_argument("--detail", type=int, default=0, help="Show top_suspects + skip_reasons for top N.")
+    p_queue.set_defaults(func=cmd_queue)
+
+    p_submit = sub.add_parser(
+        "submit",
+        help="Export per-platform submission templates for an audit run.",
+    )
+    p_submit.add_argument("run_dir")
+    p_submit.add_argument("--candidate-id", required=True)
+    p_submit.add_argument("--platforms", nargs="+", default=["c4"])
+    p_submit.add_argument("--min-severity", default="Medium")
+    p_submit.add_argument("--only-reproduced", action="store_true")
+    p_submit.set_defaults(func=cmd_submit)
 
     p_syn = sub.add_parser(
         "synthesize",
