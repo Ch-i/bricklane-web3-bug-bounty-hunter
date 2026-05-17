@@ -735,10 +735,32 @@ def cmd_deep_dive(args: argparse.Namespace) -> int:
     )
 
     elapsed = int(time.monotonic() - started)
+
+    # Optional: materialize PoCs for High/Critical candidates (slice 11/deep-dive bridge)
+    materialized_summary = ""
+    if args.materialize_pocs and report_path.parent.exists():
+        from harness import deep_dive_poc
+
+        def mat_progress(phase, idx, total, msg):
+            console.print(f"[cyan][materialize {phase} {idx}/{total}][/cyan] {msg}")
+
+        try:
+            mat_path = deep_dive_poc.materialize_for_run(
+                report_path.parent,
+                target,
+                min_severity=args.materialize_min_severity,
+                model=args.model,
+                progress_callback=mat_progress,
+            )
+            materialized_summary = "\n\n" + deep_dive_poc.render_materialization_summary(mat_path)
+        except Exception as e:  # noqa: BLE001
+            materialized_summary = f"\n\nmaterialize failed: {e}"
+
     console.print()
     console.print(
         Panel(
-            f"Report: {report_path}\nTime: {elapsed}s ({elapsed // 60}m {elapsed % 60}s)",
+            f"Report: {report_path}\nTime: {elapsed}s ({elapsed // 60}m {elapsed % 60}s)"
+            + materialized_summary,
             title="deep-dive complete",
             border_style="green",
         )
@@ -1090,6 +1112,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="Ignore prior state; start fresh.")
     p_dd.add_argument("--dry-run", action="store_true",
                       help="Decompose + print function list only; no LLM calls.")
+    p_dd.add_argument("--materialize-pocs", action="store_true",
+                      help="After per-fn pass, convert High/Critical candidate poc_sketches "
+                           "into runnable Foundry tests + forge test execute them.")
+    p_dd.add_argument("--materialize-min-severity", default="High",
+                      choices=["Critical", "High", "Medium"])
     p_dd.set_defaults(func=cmd_deep_dive)
 
     p_sweep = sub.add_parser(
