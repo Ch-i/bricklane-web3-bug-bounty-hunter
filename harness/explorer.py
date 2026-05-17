@@ -18,6 +18,7 @@ Designed for use in notebooks (returns pandas DataFrames where useful).
 from __future__ import annotations
 
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,37 @@ from harness.onchain import (
 ETHERSCAN_V2 = "https://api.etherscan.io/v2/api"
 USER_AGENT = "web3sentinel-explorer/0.1"
 
+# Free-tier Etherscan: 5 req/sec hard ceiling. We default to 3 req/sec to
+# leave headroom for transient bursts and the JSON-RPC parallel traffic.
+# Override via W3S_ETHERSCAN_RPS env var if you have a paid plan.
+_RPS_DEFAULT = float(os.environ.get("W3S_ETHERSCAN_RPS", "3.0"))
+_MIN_INTERVAL = 1.0 / _RPS_DEFAULT
+_lock = threading.Lock()
+_last_call_at = [0.0]
+
+
+def _rate_limit() -> None:
+    """Sleep so that consecutive Etherscan calls respect _MIN_INTERVAL."""
+    with _lock:
+        now = time.monotonic()
+        wait = _MIN_INTERVAL - (now - _last_call_at[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at[0] = time.monotonic()
+
+
+# Per-process call counter so notebooks can see how much daily quota they've used.
+_call_count = [0]
+
+
+def call_count() -> int:
+    """Number of Etherscan calls this process has made so far."""
+    return _call_count[0]
+
+
+def reset_call_count() -> None:
+    _call_count[0] = 0
+
 
 # ---------------------------------------------------------------------------
 # Generic helpers
@@ -57,13 +89,29 @@ def _rpc_url(chain_id: int) -> str:
 
 
 def _etherscan(params: dict, chain_id: int, timeout: float = 30.0) -> dict:
-    """Single Etherscan v2 call. Raises if the API rejects."""
+    """Single Etherscan v2 call, rate-limited at the configured RPS.
+
+    Raises if the API rejects with a non-2xx status. If Etherscan responds
+    with its own `Max calls per sec rate limit reached` message inside a 200
+    body, we sleep + retry once.
+    """
     p = {**params, "chainid": chain_id}
     if _api_key():
         p["apikey"] = _api_key()
-    resp = httpx.get(ETHERSCAN_V2, params=p, timeout=timeout, headers={"User-Agent": USER_AGENT})
-    resp.raise_for_status()
-    return resp.json()
+
+    for attempt in range(2):
+        _rate_limit()
+        resp = httpx.get(ETHERSCAN_V2, params=p, timeout=timeout, headers={"User-Agent": USER_AGENT})
+        _call_count[0] += 1
+        resp.raise_for_status()
+        body = resp.json()
+        result = body.get("result")
+        # Etherscan returns 200 with this message body when over RPS.
+        if isinstance(result, str) and "rate limit" in result.lower():
+            time.sleep(1.0)
+            continue
+        return body
+    return body  # type: ignore[unbound-local-name]
 
 
 def _rpc(method: str, params: list, chain_id: int, timeout: float = 30.0) -> dict:
