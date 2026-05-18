@@ -50,6 +50,26 @@ from harness.orchestrator import Orchestrator, OrchestratorOptions
 console = Console()
 
 
+def _load_state(scrutinize_dir: Path) -> dict:
+    p = scrutinize_dir / "state.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_state(scrutinize_dir: Path, partial: dict) -> None:
+    """Merge new keys into the on-disk state file. Each phase persists its own
+    `<phase>_run_dir` / path; subsequent re-runs detect them and skip the phase."""
+    p = scrutinize_dir / "state.json"
+    current = _load_state(scrutinize_dir)
+    current.update(partial)
+    current["last_updated"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(current, indent=2))
+
+
 def _section(title: str, n: int, total: int, elapsed: int) -> None:
     console.print()
     console.print(Rule(
@@ -336,22 +356,38 @@ def scrutinize(
 
     target_path = Path(target).expanduser().resolve()
 
-    # Create the scrutinize run directory
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    name = target_path.name if target_path.exists() else target.replace("/", "_").replace(":", "_")[:50]
-    scrutinize_dir = (out_dir or (REPO_ROOT / "audits" / f"scrutinize-{name}-{ts}"))
-    scrutinize_dir.mkdir(parents=True, exist_ok=True)
+    # If user passed --out pointing at an existing scrutinize dir, resume from it.
+    # Otherwise create a fresh timestamped dir.
+    if out_dir and out_dir.exists() and (out_dir / "state.json").exists():
+        scrutinize_dir = out_dir
+        prior_state = _load_state(scrutinize_dir)
+        console.print(f"[cyan]Resuming scrutinize from {scrutinize_dir}[/cyan]")
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        name = target_path.name if target_path.exists() else target.replace("/", "_").replace(":", "_")[:50]
+        scrutinize_dir = (out_dir or (REPO_ROOT / "audits" / f"scrutinize-{name}-{ts}"))
+        scrutinize_dir.mkdir(parents=True, exist_ok=True)
+        prior_state = {}
 
     total_phases = 4
     n = 0
 
-    audit_run_dir: Path | None = None
-    deep_dive_run_dir: Path | None = None
-    filter_results_path: Path | None = None
-    materialized_path: Path | None = None
+    audit_run_dir: Path | None = (
+        Path(prior_state["audit_run_dir"]) if prior_state.get("audit_run_dir") else None
+    )
+    deep_dive_run_dir: Path | None = (
+        Path(prior_state["deep_dive_run_dir"]) if prior_state.get("deep_dive_run_dir") else None
+    )
+    filter_results_path: Path | None = (
+        Path(prior_state["filter_results_path"]) if prior_state.get("filter_results_path") else None
+    )
+    materialized_path: Path | None = (
+        Path(prior_state["materialized_path"]) if prior_state.get("materialized_path") else None
+    )
 
     # === Phase 1: Audit ===
-    if not skip_audit:
+    audit_already_done = audit_run_dir and audit_run_dir.exists() and (audit_run_dir / "findings.json").exists()
+    if not skip_audit and not audit_already_done:
         n += 1
         _section("MULTI-MODEL AUDIT", n, total_phases, int(time.monotonic() - started))
         opts = OrchestratorOptions(
@@ -368,9 +404,17 @@ def scrutinize(
             orch.run_single()
         if orch.run_dir:
             audit_run_dir = orch.run_dir
+            _save_state(scrutinize_dir, {"audit_run_dir": str(audit_run_dir)})
+    elif audit_already_done:
+        _section("MULTI-MODEL AUDIT (cached)", 1, total_phases, int(time.monotonic() - started))
+        console.print(f"[dim]Using prior audit: {audit_run_dir}[/dim]")
 
     # === Phase 2: Deep-dive (per-fn + cross-fn) ===
-    if not skip_deep_dive:
+    dd_already_done = (
+        deep_dive_run_dir and deep_dive_run_dir.exists()
+        and (deep_dive_run_dir / "deep-dive-report.md").exists()
+    )
+    if not skip_deep_dive and not dd_already_done:
         n += 1
         _section("DEEP-DIVE (per-function + cross-function)", n, total_phases, int(time.monotonic() - started))
 
@@ -387,9 +431,14 @@ def scrutinize(
             progress_callback=dd_progress,
         )
         deep_dive_run_dir = report_path.parent
+        _save_state(scrutinize_dir, {"deep_dive_run_dir": str(deep_dive_run_dir)})
+    elif dd_already_done:
+        _section("DEEP-DIVE (cached)", 2, total_phases, int(time.monotonic() - started))
+        console.print(f"[dim]Using prior deep-dive: {deep_dive_run_dir}[/dim]")
 
     # === Phase 3: Materialize PoCs ===
-    if not skip_materialize and deep_dive_run_dir:
+    mat_already_done = materialized_path and materialized_path.exists()
+    if not skip_materialize and deep_dive_run_dir and not mat_already_done:
         n += 1
         _section("MATERIALIZE POCS (deep-dive sketches → forge tests)", n, total_phases, int(time.monotonic() - started))
 
@@ -404,8 +453,12 @@ def scrutinize(
                 model=model,
                 progress_callback=mat_progress,
             )
+            _save_state(scrutinize_dir, {"materialized_path": str(materialized_path)})
         except Exception as e:  # noqa: BLE001
             console.print(f"[yellow]Materialize failed: {e}[/yellow]")
+    elif mat_already_done:
+        _section("MATERIALIZE POCS (cached)", 3, total_phases, int(time.monotonic() - started))
+        console.print(f"[dim]Using prior materialization: {materialized_path}[/dim]")
 
     # === Phase 4: Filter pass on combined audit + materialized findings ===
     if not skip_filter and audit_run_dir:
@@ -440,6 +493,7 @@ def scrutinize(
         try:
             results = filter_agent.filter_findings(deduped, target_root, model=model)
             filter_results_path.write_text(json.dumps(deduped, indent=2))
+            _save_state(scrutinize_dir, {"filter_results_path": str(filter_results_path)})
             for f, v in results:
                 sym = {"ACCEPT": "✓", "DOWNGRADE": "↓", "REJECT": "✗", "ERROR": "!"}[v.verdict]
                 console.print(f"  {sym} [{v.verdict:9s}] {v.finding_title[:60]:60s} — {v.rationale[:60]}")

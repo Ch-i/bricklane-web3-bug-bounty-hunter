@@ -17,6 +17,83 @@ import pytest
 from harness import scrutinize
 
 
+def test_state_save_and_load_roundtrip(tmp_path: Path):
+    """State writes are incremental — calling _save_state twice should merge keys."""
+    scrutinize._save_state(tmp_path, {"audit_run_dir": "/tmp/audit-x"})
+    scrutinize._save_state(tmp_path, {"deep_dive_run_dir": "/tmp/dd-y"})
+    state = scrutinize._load_state(tmp_path)
+    assert state["audit_run_dir"] == "/tmp/audit-x"
+    assert state["deep_dive_run_dir"] == "/tmp/dd-y"
+    assert "last_updated" in state
+
+
+def test_state_load_missing_file_returns_empty(tmp_path: Path):
+    assert scrutinize._load_state(tmp_path) == {}
+
+
+def test_state_load_corrupt_file_returns_empty(tmp_path: Path):
+    (tmp_path / "state.json").write_text("not valid json {{{")
+    assert scrutinize._load_state(tmp_path) == {}
+
+
+def test_resume_skips_completed_audit_phase(tmp_path: Path, monkeypatch):
+    """If state.json points at an existing audit run dir with findings.json,
+    Orchestrator should NOT be invoked again."""
+    # Build a fake prior-completed scrutinize dir
+    scrutinize_dir = tmp_path / "scrutinize-Foo-20260518"
+    scrutinize_dir.mkdir()
+    audit_dir = tmp_path / "audit-prior"
+    audit_dir.mkdir()
+    (audit_dir / "findings.json").write_text("[]")
+    (audit_dir / "report.md").write_text("# old report")
+    scrutinize._save_state(scrutinize_dir, {"audit_run_dir": str(audit_dir)})
+
+    target = tmp_path / "Foo.sol"
+    target.write_text("contract F { function f() external {} }")
+
+    orch_calls = []
+    monkeypatch.setattr(
+        scrutinize, "Orchestrator",
+        lambda *a, **kw: (orch_calls.append(1), (_ for _ in ()).throw(AssertionError("audit re-ran")))[0],
+    )
+    # Also patch the other phases so we don't spend
+    monkeypatch.setattr(
+        scrutinize.deep_dive, "run_deep_dive",
+        lambda *a, **kw: tmp_path / "fake-dd-report.md",
+    )
+    monkeypatch.setattr(
+        scrutinize.deep_dive_poc, "materialize_for_run",
+        lambda *a, **kw: tmp_path / "fake-mat.json",
+    )
+    # Pre-create the fake deep-dive output so its run_dir resolves
+    fake_dd_dir = tmp_path / "deep-dive"
+    fake_dd_dir.mkdir()
+    (fake_dd_dir / "deep-dive-report.md").write_text("# dd report")
+    (fake_dd_dir / "per-function.jsonl").write_text("")
+    monkeypatch.setattr(
+        scrutinize.deep_dive, "run_deep_dive",
+        lambda *a, **kw: fake_dd_dir / "deep-dive-report.md",
+    )
+    (tmp_path / "fake-mat.json").write_text("[]")
+    monkeypatch.setattr(scrutinize, "filter_findings",
+                        lambda *a, **kw: [], raising=False)
+
+    # Stub out filter_agent import inside scrutinize to avoid LLM
+    import sys as _sys
+    class FakeFilterAgent:
+        @staticmethod
+        def filter_findings(*a, **kw):
+            return []
+    _sys.modules["harness.filter_agent"] = FakeFilterAgent
+
+    scrutinize.scrutinize(str(target), out_dir=scrutinize_dir)
+
+    # The audit phase should never have invoked Orchestrator
+    assert orch_calls == []
+    # Master report should still be generated
+    assert (scrutinize_dir / "scrutinize-report.md").exists()
+
+
 def test_master_report_with_all_phases(tmp_path: Path):
     scrutinize_dir = tmp_path / "scrutinize-run"
     scrutinize_dir.mkdir()
