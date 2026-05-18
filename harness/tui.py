@@ -992,6 +992,21 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_suggest(args: argparse.Namespace) -> int:
+    """Pick the best candidate(s) to scrutinize next, ranked by composite score."""
+    from harness import suggest
+
+    suggestions = suggest.suggest_top_n(
+        args.top,
+        platform=args.platform,
+        min_stage1=args.min_stage1,
+        include_audited=args.include_audited,
+        include_closed=args.include_closed,
+    )
+    suggest.render_suggestions(suggestions)
+    return 0
+
+
 def cmd_corpus(args: argparse.Namespace) -> int:
     from harness import corpus as corpus_mod
 
@@ -1264,6 +1279,17 @@ def main(argv: list[str] | None = None) -> int:
     p_syn.add_argument("--no-reindex", action="store_true")
     p_syn.add_argument("--timeout", type=int, default=1800)
     p_syn.set_defaults(func=cmd_synthesize)
+
+    p_suggest = sub.add_parser(
+        "suggest",
+        help="Pick the best candidate(s) to scrutinize next, ranked by composite score.",
+    )
+    p_suggest.add_argument("-n", "--top", type=int, default=5)
+    p_suggest.add_argument("--platform")
+    p_suggest.add_argument("--min-stage1", type=float, default=None)
+    p_suggest.add_argument("--include-audited", action="store_true")
+    p_suggest.add_argument("--include-closed", action="store_true")
+    p_suggest.set_defaults(func=cmd_suggest)
 
     p_corpus = sub.add_parser("corpus", help="Browse the corpus (search / read / stats).")
     corpus_sub = p_corpus.add_subparsers(dest="corpus_cmd", required=True)
