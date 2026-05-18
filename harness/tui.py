@@ -284,7 +284,88 @@ def _finding_panel(idx: int, f: dict, *, target_root: Path | None = None) -> Pan
     return Panel(body, title=header, border_style=SEVERITY_STYLE.get(sev, "white"))
 
 
+def _render_deep_dive_show(run_dir: Path) -> Group:
+    """Specialized view for deep-dive run dirs — counts + invariants + report path."""
+    pf_path = run_dir / "per-function.jsonl"
+    n_fn = 0
+    n_vulns = 0
+    n_high = 0
+    n_critical = 0
+    n_invariants_est = 0
+    n_invariants_ass = 0
+    if pf_path.exists():
+        import json as _json
+        for line in pf_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                fn = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            n_fn += 1
+            n_invariants_est += len(fn.get("invariants_established") or [])
+            n_invariants_ass += len(fn.get("invariants_assumed") or [])
+            for v in (fn.get("candidate_vulnerabilities") or []):
+                n_vulns += 1
+                if v.get("severity") == "High":
+                    n_high += 1
+                elif v.get("severity") == "Critical":
+                    n_critical += 1
+    cross_vulns = 0
+    cross_breakages = 0
+    cf_path = run_dir / "cross-function.jsonl"
+    if cf_path.exists():
+        import json as _json
+        for line in cf_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                c = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            cross_vulns += len(c.get("vulnerabilities") or [])
+            cross_breakages += len(c.get("broken_invariants") or [])
+
+    banner = Panel(
+        Group(
+            Text(f"Run:               {run_dir.name}", style="cyan"),
+            Text(f"Functions:         {n_fn}"),
+            Text(f"Candidate vulns:   {n_vulns}  (Critical: {n_critical}, High: {n_high})"),
+            Text(f"Cross-fn vulns:    {cross_vulns}"),
+            Text(f"Invariants:        {n_invariants_est} established, "
+                 f"{n_invariants_ass} assumed"),
+            Text(f"Invariant breaks:  {cross_breakages}"),
+            Text(""),
+            Text("See:", style="dim"),
+            Text(f"  {run_dir / 'deep-dive-report.md'}", style="cyan"),
+            Text(f"  {run_dir / 'invariants.md'}", style="cyan"),
+        ),
+        title=Text("deep-dive run", style="bold"),
+        border_style="cyan",
+    )
+    return Group(banner)
+
+
 def render_show(run_dir: Path) -> Group:
+    # Route to specialized renderer for deep-dive dirs
+    if run_dir.name.startswith("deep-dive-") or (run_dir / "deep-dive-report.md").exists():
+        return _render_deep_dive_show(run_dir)
+    # Scrutinize dirs surface the master report path + per-phase pointers
+    if run_dir.name.startswith("scrutinize-") or (run_dir / "scrutinize-report.md").exists():
+        return Group(Panel(
+            Group(
+                Text(f"Run:               {run_dir.name}", style="cyan"),
+                Text(""),
+                Text(f"Master report:     {run_dir / 'scrutinize-report.md'}", style="cyan"),
+                Text(f"State:             {run_dir / 'state.json'}", style="dim"),
+                Text(""),
+                Text("To see the master report:", style="dim"),
+                Text(f"  cat {run_dir / 'scrutinize-report.md'}", style="cyan"),
+            ),
+            title=Text("scrutinize run", style="bold"),
+            border_style="cyan",
+        ))
+
     prep = _load_prep(run_dir)
     findings = _load_findings(run_dir)
     static = _load_static_tools(run_dir)
