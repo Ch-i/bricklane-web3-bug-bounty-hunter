@@ -40,6 +40,7 @@ Follow this sequence. Use the TodoWrite tool to track which step you are on.
   == "ok"` and the function/line percentages are low, flag that in your
   `notes` field too.
 - Call `corpus_stats` once to confirm the corpus is populated and to see which vuln_classes are well-represented.
+- **Call `list_synthesis_notes` and skim the titles.** Synthesis notes are dense, hand-curated distillations covering a specific bug class (oracle staleness, MEV/sandwich, governance/timelock, reentrancy variants, etc.) drawn from dozens of real findings. They are the highest per-token grounding the corpus offers — when one matches the target's protocol category, prefer reading the synthesis note over chasing individual Solodit hits.
 
 ### Step 2 — Identify protocol category
 
@@ -71,7 +72,7 @@ This is where you earn your keep. Static tools rarely catch:
 For each hypothesis:
 
 a. State it to yourself ("this AMM may be vulnerable to first-deposit share manipulation").
-b. `search_corpus(query="...", vuln_class=[...])`. Read at least one full entry via `read_corpus_entry`.
+b. `search_corpus(query="...", vuln_class=[...])`. Read at least one full entry via `read_corpus_entry`. Synthesis-source entries (when present in results) are denser and faster to absorb than raw Solodit/SWC entries — prefer them.
 c. Apply the pattern to the actual source. If it fits, write a finding. If it does not, move on — do not force a finding just because the corpus has an entry.
 
 If you discover something the corpus does not cover, set `novel: true` on the finding so a human reviewer focuses there.
