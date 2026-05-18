@@ -26,7 +26,50 @@ def list_entries(root: Path) -> list[Path]:
     return sorted(p for p in root.iterdir() if p.is_dir() and (p / "expected-finding.md").exists())
 
 
-def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False) -> dict:
+def _merge_dd_into_findings(audit_run_dir: Path, dd_dir: Path) -> None:
+    """For eval scrutinize mode: pull deep-dive High/Critical candidates into
+    the audit's findings.json so the scorer sees the full set."""
+    pf = dd_dir / "per-function.jsonl"
+    findings_path = audit_run_dir / "findings.json"
+    if not pf.exists() or not findings_path.exists():
+        return
+    data = json.loads(findings_path.read_text())
+    findings = data if isinstance(data, list) else data.get("findings", [])
+    seen = {f.get("title") for f in findings}
+    sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+    for line in pf.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            fn = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        file_path = fn.get("function_id", "").split("::")[0] or "?"
+        for v in (fn.get("candidate_vulnerabilities") or []):
+            if sev_rank.get(v.get("severity"), 99) > 1:  # High threshold
+                continue
+            title = v.get("title", "?")
+            if title in seen:
+                continue
+            seen.add(title)
+            findings.append({
+                "title": title,
+                "severity": v.get("severity"),
+                "location": [{"file": file_path, "line_start": 1}],
+                "description": v.get("description", "") or title,
+                "impact": v.get("impact", "?"),
+                "recommendation": "(see deep-dive)",
+                "citations": [],
+                "novel": True,
+                "confidence": v.get("confidence", "medium"),
+                "discovered_by": "claude-deep-dive",
+                "poc_status": "not-attempted",
+            })
+    findings_path.write_text(json.dumps(findings, indent=2))
+
+
+def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False,
+            scrutinize_mode: bool = False) -> dict:
     expected_path = entry_dir / "expected-finding.md"
     expected = load_expected(expected_path)
 
@@ -35,7 +78,33 @@ def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False) -> d
         raise SystemExit(f"{entry_dir}: missing source/ directory")
 
     started = datetime.now(timezone.utc).isoformat()
-    if multimodel:
+    if scrutinize_mode:
+        # Scrutinize mode: run full audit + deep-dive + filter pipeline,
+        # then aggregate findings into a single list for scoring.
+        # Wraps drive_audit_multimodel + deep_dive for the harshest test.
+        from harness import scrutinize as _scrut
+        from harness import deep_dive as _dd
+
+        # Drive the audit phase first to get a real run_dir
+        drive = drive_audit_multimodel(
+            target=source_dir,
+            exclude_ids=expected.exclude_corpus_ids,
+            claude_model=model,
+        )
+        if drive.run_dir and drive.run_dir.exists():
+            # Run deep-dive on the same source — outputs to a sibling dir
+            dd_out = drive.run_dir.parent / f"{drive.run_dir.name}-deep-dive"
+            try:
+                _dd.run_deep_dive(
+                    source_dir, out_dir=dd_out, model=model,
+                    skip_cross=True,  # skip cross-pair to keep eval cheap
+                    progress_callback=None,
+                )
+                # Merge deep-dive high-sev candidates into findings.json
+                _merge_dd_into_findings(drive.run_dir, dd_out)
+            except Exception:  # noqa: BLE001
+                pass  # deep-dive failure shouldn't break the audit scoring
+    elif multimodel:
         drive = drive_audit_multimodel(
             target=source_dir,
             exclude_ids=expected.exclude_corpus_ids,
@@ -68,7 +137,12 @@ def run_one(entry_dir: Path, model: str = "opus", multimodel: bool = False) -> d
     corpus_sha = prep.get("corpus_snapshot", "untracked")
 
     result = score_entry(expected, findings, drive.run_dir, corpus_sha)
-    result.mode = "multimodel" if multimodel else "single"
+    if scrutinize_mode:
+        result.mode = "scrutinize"
+    elif multimodel:
+        result.mode = "multimodel"
+    else:
+        result.mode = "single"
     return result.model_dump()
 
 
@@ -88,6 +162,13 @@ def main(argv: list[str] | None = None) -> int:
         "--multimodel",
         action="store_true",
         help="Run Claude + Codex auditors in parallel then reconcile. ~2x cost.",
+    )
+    parser.add_argument(
+        "--scrutinize",
+        action="store_true",
+        help="Scrutinize mode: full audit + deep-dive pipeline, merging deep-dive "
+             "High/Critical candidates into findings.json before scoring. The harshest "
+             "recall test of the system. Implies --multimodel for the audit phase.",
     )
     parser.add_argument(
         "--no-append",
@@ -110,13 +191,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no eval entries found under {root}", file=sys.stderr)
         return 1
 
-    mode = "MULTIMODEL (claude+codex+reconciler)" if args.multimodel else "single-model (claude)"
+    if args.scrutinize:
+        mode = "SCRUTINIZE (audit + deep-dive merged)"
+    elif args.multimodel:
+        mode = "MULTIMODEL (claude+codex+reconciler)"
+    else:
+        mode = "single-model (claude)"
     print(f"Running {len(entries)} eval entries — mode={mode}, model={args.model}\n")
     rows = []
     for e in entries:
         print(f"=== {e.name} ===")
         try:
-            row = run_one(e, model=args.model, multimodel=args.multimodel)
+            row = run_one(e, model=args.model, multimodel=args.multimodel,
+                          scrutinize_mode=args.scrutinize)
         except Exception as ex:  # noqa: BLE001
             row = {
                 "entry_id": e.name,
