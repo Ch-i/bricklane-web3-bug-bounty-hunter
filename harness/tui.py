@@ -992,6 +992,19 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_digest(args: argparse.Namespace) -> int:
+    """What did the system do in the last N hours?"""
+    from harness import digest
+
+    d = digest.generate_digest(hours=args.hours)
+    if args.json:
+        import json as _json
+        print(_json.dumps(d, indent=2))
+    else:
+        digest.render_digest(d)
+    return 0
+
+
 def cmd_suggest(args: argparse.Namespace) -> int:
     """Pick the best candidate(s) to scrutinize next, ranked by composite score."""
     from harness import suggest
@@ -1279,6 +1292,14 @@ def main(argv: list[str] | None = None) -> int:
     p_syn.add_argument("--no-reindex", action="store_true")
     p_syn.add_argument("--timeout", type=int, default=1800)
     p_syn.set_defaults(func=cmd_synthesize)
+
+    p_digest = sub.add_parser(
+        "digest",
+        help="What did the system do in the last N hours? (overnight activity summary)",
+    )
+    p_digest.add_argument("--hours", type=float, default=24, help="Window size (default 24h).")
+    p_digest.add_argument("--json", action="store_true", help="Emit JSON instead of rendered tables.")
+    p_digest.set_defaults(func=cmd_digest)
 
     p_suggest = sub.add_parser(
         "suggest",
