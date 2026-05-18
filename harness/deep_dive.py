@@ -325,7 +325,12 @@ def _hash_unit(u: FunctionUnit) -> str:
 
 
 def _corpus_priors_for_fn(u: FunctionUnit, top_k: int = 5) -> list[dict]:
-    """Search the corpus for prior art relevant to this specific function."""
+    """Search the corpus for prior art relevant to this specific function.
+
+    Synthesis-source entries (dense corpus distillations) are boosted to the
+    top of the result list — they're the highest-density grounding the agent
+    will get and reading them first changes which bugs surface.
+    """
     queries: list[str] = []
     # Function name (e.g., "donateToReserves", "flashLoan")
     if u.name and u.name not in ("constructor", "fallback", "receive"):
@@ -344,8 +349,12 @@ def _corpus_priors_for_fn(u: FunctionUnit, top_k: int = 5) -> list[dict]:
             hits.append(
                 {"id": h.id, "title": h.title, "source": h.source, "severity": h.severity}
             )
+    # Two-key sort: synthesis-source first, then by severity rank.
     sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4, "Gas": 5}
-    hits.sort(key=lambda h: sev_rank.get(h["severity"] or "", 99))
+    hits.sort(key=lambda h: (
+        0 if h["source"] == "synthesis" else 1,
+        sev_rank.get(h["severity"] or "", 99),
+    ))
     return hits[: top_k * 2]
 
 

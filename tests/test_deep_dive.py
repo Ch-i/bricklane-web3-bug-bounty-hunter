@@ -172,6 +172,50 @@ contract X {
     assert "require(msg.sender == owner" in by["onlyOwner"].source
 
 
+def test_corpus_priors_for_fn_boosts_synthesis_source(monkeypatch):
+    """Synthesis-source entries should come first in the prior-art list,
+    ahead of Solodit/SWC entries even if they have lower severity."""
+    from dataclasses import dataclass
+
+    from harness import deep_dive
+
+    @dataclass
+    class FakeHit:
+        id: str
+        title: str
+        source: str
+        severity: str
+
+    # Build a mock corpus.search that returns a mix
+    def fake_search(query: str, top_k: int = 5):
+        return [
+            FakeHit(id="solodit-crit-1", title="solodit critical", source="solodit", severity="Critical"),
+            FakeHit(id="synth-low-2", title="synthesis low", source="synthesis", severity="Low"),
+            FakeHit(id="swc-high-3", title="swc high", source="swc", severity="High"),
+            FakeHit(id="synth-med-4", title="synthesis medium", source="synthesis", severity="Medium"),
+        ]
+
+    monkeypatch.setattr(deep_dive.corpus, "search", fake_search)
+
+    u = FunctionUnit(
+        file="V.sol", contract="V", name="myFn",
+        visibility="external", mutability="nonpayable",
+        line_start=1, line_end=10, source="function myFn() external {}",
+        danger_grep={"delegatecall": 1},
+    )
+    priors = deep_dive._corpus_priors_for_fn(u)
+
+    # First two entries must both be synthesis-source
+    assert priors[0]["source"] == "synthesis"
+    assert priors[1]["source"] == "synthesis"
+    # Within synthesis, Medium ranks above Low
+    assert priors[0]["id"] == "synth-med-4"
+    assert priors[1]["id"] == "synth-low-2"
+    # Then the non-synthesis entries follow, in severity order
+    assert priors[2]["id"] == "solodit-crit-1"
+    assert priors[3]["id"] == "swc-high-3"
+
+
 def test_function_analysis_max_severity():
     a = FunctionAnalysis(
         function_id="x",
