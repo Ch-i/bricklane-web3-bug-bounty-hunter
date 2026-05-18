@@ -796,6 +796,34 @@ def render_report(
                 parts.append(f"- {s}")
         parts.append("")
 
+    # Aggregated invariants — the contract's "rules of the road"
+    all_assumed: dict[str, set[str]] = {}
+    all_established: dict[str, set[str]] = {}
+    for a in analyses.values():
+        for inv in a.invariants_assumed:
+            all_assumed.setdefault(inv, set()).add(a.function_id)
+        for inv in a.invariants_established:
+            all_established.setdefault(inv, set()).add(a.function_id)
+    if all_assumed or all_established:
+        parts.append("## Aggregated invariants (across the audited surface)")
+        parts.append("")
+        if all_established:
+            parts.append("### Established (postconditions on success)")
+            for inv, fns in sorted(all_established.items(), key=lambda kv: -len(kv[1])):
+                parts.append(f"- `{inv}`  _({len(fns)} fn)_")
+                if len(fns) <= 4:
+                    for fn in sorted(fns):
+                        parts.append(f"  - {fn}")
+            parts.append("")
+        if all_assumed:
+            parts.append("### Assumed (preconditions — fuzz-target candidates)")
+            for inv, fns in sorted(all_assumed.items(), key=lambda kv: -len(kv[1])):
+                parts.append(f"- `{inv}`  _({len(fns)} fn)_")
+                if len(fns) <= 4:
+                    for fn in sorted(fns):
+                        parts.append(f"  - {fn}")
+            parts.append("")
+
     if cross:
         parts.append("## Cross-function interactions")
         for c in cross:

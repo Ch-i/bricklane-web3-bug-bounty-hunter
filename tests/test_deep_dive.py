@@ -236,6 +236,40 @@ def test_function_analysis_truncates_long_invariants(tmp_path):
     assert len(a.invariants_established) == 20
 
 
+def test_render_report_aggregates_invariants_across_fns():
+    """When multiple functions assume/establish the same invariant, the
+    aggregated section should group them and surface a count."""
+    from harness.deep_dive import CrossFnAnalysis, render_report
+
+    fns = {
+        "F.sol::F::deposit": FunctionAnalysis(
+            function_id="F.sol::F::deposit", summary="dep",
+            invariants_established=["totalSupply == sum(balances)"],
+        ),
+        "F.sol::F::mint": FunctionAnalysis(
+            function_id="F.sol::F::mint", summary="mint",
+            invariants_established=["totalSupply == sum(balances)"],  # same!
+        ),
+        "F.sol::F::transfer": FunctionAnalysis(
+            function_id="F.sol::F::transfer", summary="xfer",
+            invariants_assumed=["balances[u] >= amount"],
+        ),
+    }
+    units = [
+        FunctionUnit(file="F.sol", contract="F", name=n, visibility="external",
+                     mutability="nonpayable", line_start=1, line_end=2, source="//")
+        for n in ("deposit", "mint", "transfer")
+    ]
+    report = render_report(Path("."), units, fns, [])
+    assert "Aggregated invariants" in report
+    # The shared invariant appears once with count 2
+    assert "totalSupply == sum(balances)" in report
+    assert "(2 fn)" in report
+    # Assumed section also surfaces
+    assert "balances[u] >= amount" in report
+    assert "fuzz-target candidates" in report
+
+
 def test_render_report_includes_invariants():
     """render_report should surface assumed + established invariants per function."""
     from harness.deep_dive import CrossFnAnalysis, render_report
