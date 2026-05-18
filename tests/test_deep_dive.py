@@ -236,6 +236,32 @@ def test_function_analysis_truncates_long_invariants(tmp_path):
     assert len(a.invariants_established) == 20
 
 
+def test_render_report_surfaces_per_fn_errors():
+    """If a function failed analysis, its error must be surfaced in the report."""
+    from harness.deep_dive import render_report
+
+    fns = {
+        "X.sol::X::ok": FunctionAnalysis(
+            function_id="X.sol::X::ok", summary="ok fn",
+        ),
+        "X.sol::X::broken": FunctionAnalysis(
+            function_id="X.sol::X::broken",
+            error="claude timeout after 600s",
+        ),
+    }
+    units = [
+        FunctionUnit(file="X.sol", contract="X", name=n, visibility="external",
+                     mutability="nonpayable", line_start=1, line_end=2, source="//")
+        for n in ("ok", "broken")
+    ]
+    report = render_report(Path("."), units, fns, [])
+    # Error gets surfaced
+    assert "Analysis error" in report
+    assert "claude timeout after 600s" in report
+    # And the "ok" function still renders
+    assert "ok fn" in report
+
+
 def test_render_invariants_produces_focused_doc():
     """render_invariants should aggregate + section the invariants nicely."""
     from harness.deep_dive import CrossFnAnalysis, render_invariants

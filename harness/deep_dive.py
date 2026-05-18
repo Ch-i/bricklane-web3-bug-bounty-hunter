@@ -779,6 +779,10 @@ def render_report(
     )
     for a in sorted_analyses:
         parts.append(f"### {a.function_id} — max_sev: {a.max_severity}")
+        if a.error:
+            parts.append(f"**⚠ Analysis error:** `{a.error}`  _(function skipped — re-run to retry)_")
+            parts.append("")
+            continue
         parts.append(f"_{a.summary}_")
         parts.append("")
         if a.trust_boundary:
