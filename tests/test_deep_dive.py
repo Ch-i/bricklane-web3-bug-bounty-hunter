@@ -236,6 +236,48 @@ def test_function_analysis_truncates_long_invariants(tmp_path):
     assert len(a.invariants_established) == 20
 
 
+def test_render_invariants_produces_focused_doc():
+    """render_invariants should aggregate + section the invariants nicely."""
+    from harness.deep_dive import CrossFnAnalysis, render_invariants
+
+    fns = {
+        "F.sol::F::deposit": FunctionAnalysis(
+            function_id="F.sol::F::deposit", summary="dep",
+            invariants_established=["totalSupply == sum(balances)"],
+        ),
+        "F.sol::F::mint": FunctionAnalysis(
+            function_id="F.sol::F::mint", summary="mint",
+            invariants_established=["totalSupply == sum(balances)"],
+            invariants_assumed=["caller has MINTER_ROLE"],
+        ),
+    }
+    cross = [
+        CrossFnAnalysis(
+            pair_id="deposit+mint", shared_state=["totalSupply"],
+            broken_invariants=[
+                {"invariant": "totalSupply == sum(balances)",
+                 "broken_by": "mint",
+                 "how": "increments totalSupply without updating balances"}
+            ],
+        ),
+    ]
+    doc = render_invariants(Path("/x/MyContract"), fns, cross)
+    assert "Invariants — MyContract" in doc
+    assert "Postconditions established" in doc
+    assert "totalSupply == sum(balances)" in doc
+    assert "Established by 2 function(s)" in doc
+    assert "caller has MINTER_ROLE" in doc
+    assert "Detected invariant breakages" in doc
+    assert "increments totalSupply without updating balances" in doc
+    assert "Suggested next steps" in doc
+
+
+def test_render_invariants_empty_input_has_placeholder():
+    from harness.deep_dive import render_invariants
+    doc = render_invariants(Path("/x/Empty"), {}, [])
+    assert "No explicit invariants surfaced" in doc
+
+
 def test_render_report_aggregates_invariants_across_fns():
     """When multiple functions assume/establish the same invariant, the
     aggregated section should group them and surface a count."""

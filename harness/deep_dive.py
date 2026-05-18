@@ -850,6 +850,93 @@ def render_report(
     return "\n".join(parts)
 
 
+def render_invariants(
+    target_root: Path,
+    analyses: dict[str, FunctionAnalysis],
+    cross: list[CrossFnAnalysis],
+) -> str:
+    """Render a focused `invariants.md` doc — the contract's rules of the road.
+
+    This is the artifact you hand to a fuzzer, paste into an audit report's
+    "preconditions/postconditions" section, or use as the spec for invariant
+    tests.
+    """
+    parts: list[str] = []
+    parts.append(f"# Invariants — {target_root.name}")
+    parts.append("")
+    parts.append(f"_Auto-extracted from deep-dive analysis of "
+                 f"{len(analyses)} function(s)._")
+    parts.append("")
+
+    # Aggregate
+    by_established: dict[str, set[str]] = {}
+    by_assumed: dict[str, set[str]] = {}
+    for a in analyses.values():
+        for inv in a.invariants_established:
+            by_established.setdefault(inv, set()).add(a.function_id)
+        for inv in a.invariants_assumed:
+            by_assumed.setdefault(inv, set()).add(a.function_id)
+
+    breakages = []
+    for c in cross:
+        for bi in c.broken_invariants:
+            breakages.append({**bi, "pair": c.pair_id})
+
+    if not by_established and not by_assumed and not breakages:
+        parts.append("_No explicit invariants surfaced — the analyzer didn't "
+                     "extract any. (This may indicate a too-shallow analysis "
+                     "or a function set with no shared state.)_")
+        return "\n".join(parts)
+
+    parts.append("## Postconditions established (on successful return)")
+    parts.append("")
+    if by_established:
+        for inv, fns in sorted(by_established.items(), key=lambda kv: -len(kv[1])):
+            parts.append(f"### `{inv}`")
+            parts.append(f"_Established by {len(fns)} function(s):_")
+            for fn in sorted(fns):
+                parts.append(f"  - `{fn}`")
+            parts.append("")
+    else:
+        parts.append("_(none surfaced)_")
+        parts.append("")
+
+    parts.append("## Preconditions assumed (potential fuzz targets)")
+    parts.append("")
+    if by_assumed:
+        for inv, fns in sorted(by_assumed.items(), key=lambda kv: -len(kv[1])):
+            parts.append(f"### `{inv}`")
+            parts.append(f"_Assumed by {len(fns)} function(s):_")
+            for fn in sorted(fns):
+                parts.append(f"  - `{fn}`")
+            parts.append("")
+    else:
+        parts.append("_(none surfaced)_")
+        parts.append("")
+
+    parts.append("## Detected invariant breakages (cross-function)")
+    parts.append("")
+    if breakages:
+        for bi in breakages:
+            parts.append(f"- **`{bi.get('invariant', '?')}`**")
+            parts.append(f"  - Broken by: `{bi.get('broken_by', '?')}` in pair `{bi.get('pair', '?')}`")
+            parts.append(f"  - How: {bi.get('how', '?')}")
+        parts.append("")
+    else:
+        parts.append("_(none detected — cross-fn pass found no breakages)_")
+        parts.append("")
+
+    parts.append("## Suggested next steps")
+    parts.append("")
+    parts.append("- Translate `Established` postconditions into Foundry invariant "
+                 "tests (`function invariant_X() public`).")
+    parts.append("- Use `Assumed` preconditions as fuzz boundaries — values that "
+                 "violate them should never reach the function.")
+    parts.append("- Investigate every `breakage` entry as a candidate bug.")
+
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Top-level orchestrator
 # ---------------------------------------------------------------------------
@@ -929,6 +1016,10 @@ def run_deep_dive(
     report = render_report(target_root, units, analyses, cross_results)
     report_path = out_dir / "deep-dive-report.md"
     report_path.write_text(report)
+
+    # Side-output: invariants.md — a focused doc of the contract's rules
+    invariants_md = render_invariants(target_root, analyses, cross_results)
+    (out_dir / "invariants.md").write_text(invariants_md)
 
     # Also dump JSONL for tooling
     (out_dir / "per-function.jsonl").write_text(
