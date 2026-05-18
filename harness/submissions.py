@@ -73,6 +73,23 @@ def _format_loc(finding: Finding) -> str:
     return "\n".join(out) if out else "_(no locations)_"
 
 
+def _format_filter_block(filter_info: dict | None) -> str:
+    """If the finding went through the Mythos filter, surface the verdict
+    in the submission template — helps the submitter know what was already
+    checked (and gives the judge confidence)."""
+    if not filter_info:
+        return ""
+    verdict = filter_info.get("verdict", "")
+    rationale = filter_info.get("rationale", "")
+    if not verdict:
+        return ""
+    sym = {"ACCEPT": "✅", "DOWNGRADE": "↓", "REJECT": "✗", "ERROR": "!"}.get(verdict, "·")
+    return (
+        f"\n> **Internal review:** {sym} `{verdict}` — {rationale}\n"
+        f"> _(Verdict from web3Sentinel's filter agent — second-opinion pass.)_\n"
+    )
+
+
 def _format_foundry_poc(finding: Finding, run_dir: Path) -> str:
     if not finding.foundry_poc:
         return ""
@@ -98,14 +115,16 @@ def _format_foundry_poc(finding: Finding, run_dir: Path) -> str:
 # -------- C4 template --------
 
 
-def render_c4(finding: Finding, candidate_id: str, run_dir: Path) -> str:
+def render_c4(finding: Finding, candidate_id: str, run_dir: Path, *,
+              filter_info: dict | None = None) -> str:
     """Code4rena submission format. Markdown, with severity in title."""
     sev_letter = _severity_letter(finding.severity)
     poc_block = _format_foundry_poc(finding, run_dir)
+    filter_block = _format_filter_block(filter_info)
     cites = ", ".join(f"`{c}`" for c in finding.citations) if finding.citations else "_(novel)_"
     return f"""\
 # [{sev_letter}] {finding.title}
-
+{filter_block}
 ## Lines of code
 
 {_format_loc(finding)}
@@ -138,13 +157,16 @@ _Auto-generated from `{run_dir.name}/findings.json`; manually edit before submis
 # -------- Sherlock template --------
 
 
-def render_sherlock(finding: Finding, candidate_id: str, run_dir: Path) -> str:
+def render_sherlock(finding: Finding, candidate_id: str, run_dir: Path, *,
+                    filter_info: dict | None = None) -> str:
     """Sherlock submission shape."""
     poc_block = _format_foundry_poc(finding, run_dir)
+    filter_block = _format_filter_block(filter_info)
     return f"""\
 # {finding.title}
 
 **Severity:** {finding.severity}
+{filter_block}
 
 ## Summary
 
@@ -176,14 +198,17 @@ web3Sentinel + Foundry
 # -------- Cantina template --------
 
 
-def render_cantina(finding: Finding, candidate_id: str, run_dir: Path) -> str:
+def render_cantina(finding: Finding, candidate_id: str, run_dir: Path, *,
+                   filter_info: dict | None = None) -> str:
     """Cantina prefers structured markdown; close to Sherlock's shape."""
     poc_block = _format_foundry_poc(finding, run_dir)
+    filter_block = _format_filter_block(filter_info)
     return f"""\
 ---
 title: "{finding.title}"
 severity: {finding.severity}
 ---
+{filter_block}
 
 ## Description
 
@@ -207,15 +232,18 @@ severity: {finding.severity}
 # -------- Immunefi template --------
 
 
-def render_immunefi(finding: Finding, candidate_id: str, run_dir: Path) -> str:
+def render_immunefi(finding: Finding, candidate_id: str, run_dir: Path, *,
+                    filter_info: dict | None = None) -> str:
     """Immunefi requires PoC for High/Critical; their portal has its own template
     but markdown lifts cleanly."""
     poc_block = _format_foundry_poc(finding, run_dir)
+    filter_block = _format_filter_block(filter_info)
     return f"""\
 # {finding.title}
 
 **Severity:** {finding.severity}
 **Target:** {candidate_id}
+{filter_block}
 
 ## Brief / Intro
 
@@ -306,7 +334,14 @@ def export_run(
     data = json.loads(findings_path.read_text())
     if isinstance(data, dict) and "findings" in data:
         data = data["findings"]
-    findings = [Finding.model_validate(f) for f in data]
+    # Parse Finding objects but ALSO keep the raw dict so we can surface
+    # filter verdicts + extras the schema doesn't store (set by scrutinize).
+    findings_pairs: list[tuple[Finding, dict]] = []
+    for raw in data:
+        try:
+            findings_pairs.append((Finding.model_validate(raw), raw))
+        except Exception:  # noqa: BLE001
+            continue
 
     sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Informational": 4, "Gas": 5}
     min_rank = sev_rank.get(min_severity, 99)
@@ -315,18 +350,19 @@ def export_run(
     out_root = SUBMISSIONS_DIR / datetime.now(timezone.utc).strftime("%Y-%m-%d") / candidate_id
     out_root.mkdir(parents=True, exist_ok=True)
 
-    for finding in findings:
+    for finding, raw in findings_pairs:
         if sev_rank.get(finding.severity, 99) > min_rank:
             continue
         if only_reproduced and finding.poc_status not in ("reproduced",):
             continue
+        filter_info = raw.get("filter") or {}
         slug = _slugify(finding.title)
         for platform in platforms:
             renderer = _RENDERERS.get(platform)
             if not renderer:
                 continue
             out_path = out_root / f"{slug}--{platform}.md"
-            out_path.write_text(renderer(finding, candidate_id, run_dir))
+            out_path.write_text(renderer(finding, candidate_id, run_dir, filter_info=filter_info))
             try:
                 template_path_str = str(out_path.relative_to(REPO_ROOT))
             except ValueError:
