@@ -168,6 +168,71 @@ def test_render_digest_handles_empty_digest(capsys, tmp_path, monkeypatch):
     assert "No activity in the last" in captured.out
 
 
+def test_render_digest_emits_next_steps_when_unranked_cands_exist(capsys):
+    """If user has fresh unranked candidates, Next steps should mention Stage 1."""
+    d = {
+        "window_hours": 24,
+        "since": _iso(-24),
+        "now": _iso(),
+        "candidates": [{
+            "id": f"c4-x{i}", "platform": "code4rena", "title": "fresh",
+            "payout_max_usd": None, "triage_score": None, "triage_status": "new",
+            "is_new": True, "was_triaged": False, "local_path": None,
+        } for i in range(8)],
+        "audit_runs": [],
+        "submissions": [],
+        "corpus": {"synthesis_notes": [], "ingested_count": 0, "by_source": {}},
+    }
+    digest.render_digest(d)
+    captured = capsys.readouterr()
+    assert "Next steps" in captured.out
+    assert "have no Stage-1 rank" in captured.out
+    assert "w3s sweep" in captured.out
+
+
+def test_render_digest_emits_next_steps_for_unwrapped_deep_dives(capsys):
+    """A deep-dive run without master report → suggest scrutinize."""
+    d = {
+        "window_hours": 24,
+        "since": _iso(-24),
+        "now": _iso(),
+        "candidates": [],
+        "audit_runs": [{
+            "name": "deep-dive-x", "kind": "deep-dive",
+            "mtime": _iso(-2), "n_findings": 10,
+            "has_pocs": False, "has_master_report": False,
+        }],
+        "submissions": [],
+        "corpus": {"synthesis_notes": [], "ingested_count": 0, "by_source": {}},
+    }
+    digest.render_digest(d)
+    captured = capsys.readouterr()
+    assert "Next steps" in captured.out
+    assert "lack a master scrutinize report" in captured.out
+    assert "w3s scrutinize" in captured.out
+
+
+def test_render_digest_emits_next_steps_for_unsubmitted_scrutinize(capsys):
+    """A scrutinize run without submissions → suggest reviewing + submitting."""
+    d = {
+        "window_hours": 24,
+        "since": _iso(-24),
+        "now": _iso(),
+        "candidates": [],
+        "audit_runs": [{
+            "name": "scrutinize-x", "kind": "scrutinize",
+            "mtime": _iso(-2), "n_findings": 5,
+            "has_pocs": True, "has_master_report": True,
+        }],
+        "submissions": [],
+        "corpus": {"synthesis_notes": [], "ingested_count": 0, "by_source": {}},
+    }
+    digest.render_digest(d)
+    captured = capsys.readouterr()
+    assert "0 submissions filed" in captured.out
+    assert "w3s submit" in captured.out
+
+
 def test_render_digest_emits_candidate_table(capsys):
     """Candidate table should include the candidate id + payout."""
     d = {
