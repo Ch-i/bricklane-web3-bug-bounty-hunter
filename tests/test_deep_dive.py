@@ -172,6 +172,104 @@ contract X {
     assert "require(msg.sender == owner" in by["onlyOwner"].source
 
 
+def test_function_analysis_parses_invariants(tmp_path):
+    """analyze_function should parse invariants_assumed + invariants_established."""
+    from harness.deep_dive import analyze_function
+
+    src = """contract Bank {
+    function withdraw() external {}
+}"""
+    p = _write(tmp_path, "Bank.sol", src)
+    units = decompose_file(p, tmp_path)
+    u = units[0]
+
+    fake_payload = {
+        "function_id": u.fn_id,
+        "summary": "withdraw all",
+        "state_writes": [],
+        "external_calls": [],
+        "invariants_assumed": [
+            "balances[msg.sender] >= amount",
+            "totalSupply == sum(balances)",
+        ],
+        "invariants_established": [
+            "balances[msg.sender] == prev - amount",
+        ],
+        "candidate_vulnerabilities": [],
+        "safe_observations": [],
+    }
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = json.dumps({"result": json.dumps(fake_payload)})
+    proc.stderr = ""
+
+    with patch("harness.deep_dive.subprocess.run", return_value=proc):
+        a = analyze_function(u, tmp_path)
+    assert "balances[msg.sender] >= amount" in a.invariants_assumed
+    assert "totalSupply == sum(balances)" in a.invariants_assumed
+    assert len(a.invariants_established) == 1
+
+
+def test_function_analysis_truncates_long_invariants(tmp_path):
+    """Each invariant is capped at 300 chars; list capped at 20."""
+    from harness.deep_dive import analyze_function
+
+    src = "contract X { function f() external {} }"
+    p = _write(tmp_path, "X.sol", src)
+    u = decompose_file(p, tmp_path)[0]
+
+    fake_payload = {
+        "function_id": u.fn_id,
+        "summary": "x",
+        "invariants_assumed": ["x" * 500],  # too long
+        "invariants_established": ["a"] * 30,  # too many
+        "state_writes": [], "external_calls": [],
+        "candidate_vulnerabilities": [], "safe_observations": [],
+    }
+    proc = MagicMock()
+    proc.returncode = 0
+    proc.stdout = json.dumps({"result": json.dumps(fake_payload)})
+
+    with patch("harness.deep_dive.subprocess.run", return_value=proc):
+        a = analyze_function(u, tmp_path)
+    assert len(a.invariants_assumed[0]) == 300
+    assert len(a.invariants_established) == 20
+
+
+def test_render_report_includes_invariants():
+    """render_report should surface assumed + established invariants per function."""
+    from harness.deep_dive import CrossFnAnalysis, render_report
+
+    fn = FunctionAnalysis(
+        function_id="Bank.sol::Bank::withdraw",
+        summary="withdraw all",
+        invariants_assumed=["balances[u] >= amount"],
+        invariants_established=["balances[u] decreased"],
+    )
+    cross = [
+        CrossFnAnalysis(
+            pair_id="A+B",
+            shared_state=["balances"],
+            interaction_kind="shares-state",
+            broken_invariants=[
+                {"invariant": "totalSupply == sum(balances)",
+                 "broken_by": "b", "how": "mints without increasing total"}
+            ],
+            vulnerabilities=[],
+        ),
+    ]
+    units = [FunctionUnit(file="Bank.sol", contract="Bank", name="withdraw",
+                          visibility="external", mutability="nonpayable",
+                          line_start=1, line_end=10, source="//")]
+    report = render_report(Path("."), units, {"Bank.sol::Bank::withdraw": fn}, cross)
+    assert "Assumes invariants" in report
+    assert "balances[u] >= amount" in report
+    assert "Establishes invariants" in report
+    assert "Invariant breakages" in report
+    assert "totalSupply == sum(balances)" in report
+    assert "mints without increasing total" in report
+
+
 def test_corpus_priors_for_fn_boosts_synthesis_source(monkeypatch):
     """Synthesis-source entries should come first in the prior-art list,
     ahead of Solodit/SWC entries even if they have lower severity."""

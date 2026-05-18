@@ -71,6 +71,19 @@ each candidate vulnerability, give:
   * an estimated severity (Critical / High / Medium / Low / Info)
   * a sketch of a Foundry PoC if exploitable
 
+ALSO list the INVARIANTS this function relies on or maintains. An
+invariant is a property the function ASSUMES is true (a precondition
+the rest of the codebase is supposed to enforce) or ESTABLISHES
+(a postcondition the function guarantees on success). Examples:
+
+  * "totalShares == sum(balances)"     — system-wide accounting invariant
+  * "userBalance[u] <= totalBalance"   — per-user can't exceed total
+  * "msg.sender is owner OR proposal passed"  — access invariant
+  * "block.timestamp >= unlockTime"    — temporal invariant
+
+Invariants are how the cross-function pass detects violations: if fn A
+establishes an invariant and fn B can break it, that's a bug.
+
 Output ONLY this JSON shape:
 
 {
@@ -80,6 +93,8 @@ Output ONLY this JSON shape:
   "value_flow": "<does ETH or tokens move in/out? where?>",
   "state_writes": [{"slot": "<var>", "condition": "<when>"}],
   "external_calls": [{"target": "<addr-or-var>", "kind": "call | delegatecall | staticcall | transfer | safeTransfer", "before_state_update": <bool>}],
+  "invariants_assumed": ["<property this function depends on being true>"],
+  "invariants_established": ["<property this function guarantees on success>"],
   "candidate_vulnerabilities": [
     {
       "title": "...",
@@ -113,7 +128,19 @@ You will be given:
   * Function A's full source + the prior single-fn analysis
   * Function B's full source + its analysis
   * The shared state (variables both functions write or read)
+  * Each function's invariants_assumed + invariants_established
   * Corpus prior-art on cross-function attack patterns
+
+PRIMARY ATTACK SHAPE: INVARIANT BREAKAGE.
+Look for cases where fn A ESTABLISHES an invariant that fn B then
+BREAKS or RELIES on differently. Examples to think about:
+
+  * A assumes "totalSupply == sum(balances)" but B mints without updating both
+  * A assumes "msg.sender == owner" via modifier, but B can be reached via
+    a delegatecall path that bypasses the modifier
+  * A establishes "lockedUntil >= now + DELAY" but B can reduce lockedUntil
+  * A reads price, then B executes — price changed (oracle stale)
+  * A's reentry guard doesn't cover B (multi-function reentrancy)
 
 Output ONLY this JSON:
 
@@ -121,6 +148,9 @@ Output ONLY this JSON:
   "pair_id": "<fn_a> + <fn_b>",
   "shared_state": ["<var names>"],
   "interaction_kind": "shares-state | a-calls-b | b-calls-a | both-public-shared",
+  "broken_invariants": [
+    {"invariant": "<which invariant>", "broken_by": "<a|b>", "how": "<short>"}
+  ],
   "vulnerabilities": [
     {
       "title": "Cross-fn ...",
@@ -137,7 +167,7 @@ Output ONLY this JSON:
 
 Skip the pair (output empty vulnerabilities array) if the interaction
 is provably safe (e.g., disjoint state, no call edge, no overlapping
-reentry path).
+reentry path, no shared invariant).
 """
 
 
@@ -421,6 +451,8 @@ class FunctionAnalysis:
     value_flow: str = ""
     state_writes: list = field(default_factory=list)
     external_calls: list = field(default_factory=list)
+    invariants_assumed: list = field(default_factory=list)
+    invariants_established: list = field(default_factory=list)
     candidate_vulnerabilities: list = field(default_factory=list)
     safe_observations: list = field(default_factory=list)
     notes: str = ""
@@ -503,6 +535,8 @@ def analyze_function(
         value_flow=str(payload.get("value_flow", ""))[:500],
         state_writes=list(payload.get("state_writes") or []),
         external_calls=list(payload.get("external_calls") or []),
+        invariants_assumed=[str(i)[:300] for i in (payload.get("invariants_assumed") or [])][:20],
+        invariants_established=[str(i)[:300] for i in (payload.get("invariants_established") or [])][:20],
         candidate_vulnerabilities=list(payload.get("candidate_vulnerabilities") or []),
         safe_observations=list(payload.get("safe_observations") or []),
         notes=str(payload.get("notes", ""))[:1000],
@@ -554,6 +588,7 @@ class CrossFnAnalysis:
     pair_id: str
     shared_state: list = field(default_factory=list)
     interaction_kind: str = ""
+    broken_invariants: list = field(default_factory=list)
     vulnerabilities: list = field(default_factory=list)
     notes: str = ""
     raw_response: str = ""
@@ -578,14 +613,26 @@ def analyze_cross_pair(
     a_an = analyses.get(a.fn_id)
     b_an = analyses.get(b.fn_id)
 
+    def _inv_block(an: FunctionAnalysis | None, label: str) -> str:
+        if not an:
+            return ""
+        parts = []
+        if an.invariants_assumed:
+            parts.append(f"  invariants_assumed: {an.invariants_assumed}")
+        if an.invariants_established:
+            parts.append(f"  invariants_established: {an.invariants_established}")
+        return ("\n" + "\n".join(parts)) if parts else ""
+
     brief = (
         f"# Cross-function pair: {a.fn_id}  +  {b.fn_id}\n\n"
         f"## Shared state: {shared}\n\n"
         f"## Function A: {a.fn_id}\n"
-        f"prior single-fn analysis summary: {a_an.summary if a_an else ''}\n"
+        f"prior single-fn analysis summary: {a_an.summary if a_an else ''}"
+        f"{_inv_block(a_an, 'A')}\n"
         f"```solidity\n{_with_line_numbers(a.source, a.line_start)}\n```\n\n"
         f"## Function B: {b.fn_id}\n"
-        f"prior single-fn analysis summary: {b_an.summary if b_an else ''}\n"
+        f"prior single-fn analysis summary: {b_an.summary if b_an else ''}"
+        f"{_inv_block(b_an, 'B')}\n"
         f"```solidity\n{_with_line_numbers(b.source, b.line_start)}\n```\n\n"
         f"Output ONLY the JSON described in the system prompt."
     )
@@ -628,6 +675,7 @@ def analyze_cross_pair(
         pair_id=str(payload.get("pair_id", f"{a.fn_id}+{b.fn_id}")),
         shared_state=list(payload.get("shared_state") or []),
         interaction_kind=str(payload.get("interaction_kind", "")),
+        broken_invariants=list(payload.get("broken_invariants") or []),
         vulnerabilities=list(payload.get("vulnerabilities") or []),
         notes=str(payload.get("notes", ""))[:600],
         raw_response=text_out[:2000],
@@ -720,6 +768,14 @@ def render_report(
                 + (" [BEFORE state-update]" if c.get('before_state_update') else "")
                 for c in a.external_calls
             ))
+        if a.invariants_assumed:
+            parts.append("**Assumes invariants:**")
+            for inv in a.invariants_assumed:
+                parts.append(f"  - {inv}")
+        if a.invariants_established:
+            parts.append("**Establishes invariants:**")
+            for inv in a.invariants_established:
+                parts.append(f"  - {inv}")
         parts.append("")
         if a.candidate_vulnerabilities:
             parts.append("#### Candidate vulnerabilities")
@@ -743,10 +799,18 @@ def render_report(
     if cross:
         parts.append("## Cross-function interactions")
         for c in cross:
-            if not c.vulnerabilities and not c.error:
+            has_findings = c.vulnerabilities or c.broken_invariants or c.error
+            if not has_findings:
                 continue
             parts.append(f"### {c.pair_id}")
             parts.append(f"shared: {', '.join(c.shared_state)} | kind: {c.interaction_kind}")
+            if c.broken_invariants:
+                parts.append("**Invariant breakages:**")
+                for bi in c.broken_invariants:
+                    parts.append(
+                        f"  - `{bi.get('invariant','?')}` broken by "
+                        f"`{bi.get('broken_by','?')}` — {bi.get('how','?')}"
+                    )
             for v in c.vulnerabilities:
                 parts.append(f"- **[{v.get('severity','?')}] {v.get('title','?')}**")
                 parts.append(f"  - sequence: {v.get('sequence','?')}")
