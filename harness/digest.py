@@ -308,6 +308,37 @@ def render_digest(digest: dict) -> None:
     if nothing:
         console.print(f"\n[dim]No activity in the last {h} hours. "
                       f"Run `w3s sweep` to ingest, then `w3s suggest` to pick a target.[/dim]")
+        return
+
+    # === Next steps — actionable hints based on the digest ===
+    actions = []
+    # Unranked candidates → suggest Stage 1 ranking
+    unranked = sum(1 for c in cands if c["is_new"] and c["triage_score"] is None)
+    if unranked >= 5:
+        actions.append(
+            f"[yellow]{unranked} new candidates have no Stage-1 rank.[/yellow] "
+            f"Run [cyan]w3s sweep --max-new {min(unranked, 30)}[/cyan] to score them, "
+            f"or [cyan]w3s suggest[/cyan] to pick from current queue."
+        )
+    # Deep-dive runs without scrutinize wrap → suggest scrutinize
+    dd_only = [r for r in runs if r["kind"] == "deep-dive" and not r.get("has_master_report")]
+    if dd_only:
+        actions.append(
+            f"[yellow]{len(dd_only)} deep-dive run(s) lack a master scrutinize report.[/yellow] "
+            f"Run [cyan]w3s scrutinize --from-candidate <id>[/cyan] for the full pipeline."
+        )
+    # Scrutinize runs without submissions
+    scrut_runs = [r for r in runs if r["kind"] == "scrutinize"]
+    if scrut_runs and not subs:
+        actions.append(
+            f"[yellow]{len(scrut_runs)} scrutinize run(s) completed but 0 submissions filed.[/yellow] "
+            f"Review [cyan]$(w3s latest --kind scrutinize)/scrutinize-report.md[/cyan] and "
+            f"[cyan]w3s submit[/cyan] the ACCEPT'd findings."
+        )
+    if actions:
+        console.print("\n[bold cyan]Next steps[/bold cyan]")
+        for a in actions:
+            console.print(f"  • {a}")
 
 
 def main(argv: list[str] | None = None) -> int:
