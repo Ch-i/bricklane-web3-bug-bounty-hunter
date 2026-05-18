@@ -439,6 +439,63 @@ def test_analyze_function_parses_well_formed_response(tmp_path):
     assert a.max_severity == "Low"
 
 
+def test_shared_state_pairs_uses_invariant_overlap(tmp_path):
+    """Functions that share invariants (A establishes X, B assumes X) should
+    be paired even if their state_writes don't overlap."""
+    src = """contract Vault {
+    uint256 totalShares;
+    uint256 totalAssets;
+    function deposit() external {}
+    function priceCheck() external view {}
+}"""
+    p = _write(tmp_path, "Vault.sol", src)
+    units = decompose_file(p, tmp_path)
+    by_name = {u.name: u for u in units}
+
+    analyses = {
+        by_name["deposit"].fn_id: FunctionAnalysis(
+            function_id=by_name["deposit"].fn_id,
+            state_writes=[{"slot": "totalShares", "condition": "always"}],
+            invariants_established=["totalShares >= 0"],
+        ),
+        by_name["priceCheck"].fn_id: FunctionAnalysis(
+            function_id=by_name["priceCheck"].fn_id,
+            state_writes=[],  # view function, no writes
+            invariants_assumed=["totalShares >= 0"],  # same invariant!
+        ),
+    }
+    pairs = _shared_state_pairs(units, analyses, max_pairs=10)
+    # Even with no overlapping state_writes, the shared invariant should pair them
+    assert len(pairs) >= 1
+    a, b, overlap = pairs[0]
+    fn_ids = {a.fn_id, b.fn_id}
+    assert by_name["deposit"].fn_id in fn_ids
+    assert by_name["priceCheck"].fn_id in fn_ids
+    # The overlap should include the invariant prefix
+    assert any(o.startswith("INV:") for o in overlap)
+
+
+def test_shared_state_pairs_dedups_orderless(tmp_path):
+    """(a, b) and (b, a) should be returned once, not twice."""
+    src = """contract X {
+    uint256 z;
+    function a() external { z = 1; }
+    function b() external { z = 2; }
+}"""
+    p = _write(tmp_path, "X.sol", src)
+    units = decompose_file(p, tmp_path)
+    analyses = {
+        u.fn_id: FunctionAnalysis(
+            function_id=u.fn_id,
+            state_writes=[{"slot": "z", "condition": "always"}],
+        )
+        for u in units
+    }
+    pairs = _shared_state_pairs(units, analyses, max_pairs=10)
+    # Exactly one pair, not two
+    assert len(pairs) == 1
+
+
 def test_shared_state_pairs_identifies_overlap(tmp_path):
     # Two functions in same contract that both write to "balances"
     src = """contract Bank {
@@ -456,6 +513,7 @@ def test_shared_state_pairs_identifies_overlap(tmp_path):
         for u in units
     }
     pairs = _shared_state_pairs(units, analyses, max_pairs=10)
-    assert len(pairs) >= 2  # deposit↔withdraw, withdraw↔deposit (or both directions)
+    # Exactly 1 pair: deposit↔withdraw (deduped — order-independent)
+    assert len(pairs) == 1
     a, b, shared = pairs[0]
     assert "balances" in shared

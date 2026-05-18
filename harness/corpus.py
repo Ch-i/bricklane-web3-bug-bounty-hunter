@@ -105,9 +105,15 @@ DDL = [
 def connect(path: Path | None = None) -> Iterator[sqlite3.Connection]:
     p = path or db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(p)
+    # 30s busy timeout — if a concurrent writer (e.g. background synthesizer
+    # reindex) holds the write lock, retry rather than fail immediately.
+    conn = sqlite3.connect(p, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
+    # WAL mode lets readers proceed while a writer is mid-transaction —
+    # crucial for tests + analysis tools running alongside crawlers.
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
     try:
         yield conn
         conn.commit()

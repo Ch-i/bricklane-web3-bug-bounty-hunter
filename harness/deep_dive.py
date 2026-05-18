@@ -552,33 +552,60 @@ def analyze_function(
 
 
 def _shared_state_pairs(units: list[FunctionUnit], analyses: dict[str, FunctionAnalysis], max_pairs: int = 50) -> list[tuple[FunctionUnit, FunctionUnit, list[str]]]:
-    """Find pairs of functions in the same contract sharing state writes/reads."""
+    """Find pairs of functions in the same contract that:
+      1. Share state writes (the slot intersection is non-empty), OR
+      2. Share invariants (one establishes what another assumes).
+
+    Pairs are deduped (a,b) so we don't analyze (a,b) and (b,a) separately.
+    Sorted by max-severity-of-either-function then by overlap size.
+    """
     # Group by contract
     by_contract: dict[str, list[FunctionUnit]] = {}
     for u in units:
         by_contract.setdefault(f"{u.file}::{u.contract}", []).append(u)
 
+    seen_pairs: set[tuple[str, str]] = set()
     pairs: list[tuple[FunctionUnit, FunctionUnit, list[str]]] = []
     for key, group in by_contract.items():
-        # In each contract, pair every (state-mutating, state-mutating-or-reading) pair
-        mutators = [u for u in group if analyses.get(u.fn_id) and analyses[u.fn_id].state_writes]
-        readers = group  # any function in same contract is a candidate
-        for a in mutators:
-            for b in readers:
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
                 if a.fn_id == b.fn_id:
                     continue
-                a_writes = {s.get("slot") for s in analyses.get(a.fn_id, FunctionAnalysis(function_id=a.fn_id)).state_writes if isinstance(s, dict)}
-                b_writes = {s.get("slot") for s in analyses.get(b.fn_id, FunctionAnalysis(function_id=b.fn_id)).state_writes if isinstance(s, dict)}
-                shared = list(a_writes & b_writes)
-                if not shared:
+                pair_key = tuple(sorted([a.fn_id, b.fn_id]))
+                if pair_key in seen_pairs:
                     continue
-                pairs.append((a, b, shared))
-    # Prioritize by total severity rank of either function
+
+                a_an = analyses.get(a.fn_id, FunctionAnalysis(function_id=a.fn_id))
+                b_an = analyses.get(b.fn_id, FunctionAnalysis(function_id=b.fn_id))
+
+                # 1. Shared state writes
+                a_writes = {s.get("slot") for s in a_an.state_writes if isinstance(s, dict)}
+                b_writes = {s.get("slot") for s in b_an.state_writes if isinstance(s, dict)}
+                shared_state = list(a_writes & b_writes)
+
+                # 2. Cross-invariant overlap: A_established ∩ B_assumed (or B_est ∩ A_ass)
+                a_est = set(a_an.invariants_established)
+                a_ass = set(a_an.invariants_assumed)
+                b_est = set(b_an.invariants_established)
+                b_ass = set(b_an.invariants_assumed)
+                cross_inv = list((a_est & b_ass) | (b_est & a_ass))
+
+                overlap = shared_state + [f"INV:{i}" for i in cross_inv]
+                if not overlap:
+                    continue
+
+                seen_pairs.add(pair_key)
+                pairs.append((a, b, overlap))
+
     sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4, "Informational": 4}
     def score(p):
-        a, b, _ = p
-        return min(sev_rank.get(analyses[a.fn_id].max_severity, 99) if a.fn_id in analyses else 99,
-                   sev_rank.get(analyses[b.fn_id].max_severity, 99) if b.fn_id in analyses else 99)
+        a, b, overlap = p
+        max_sev = min(
+            sev_rank.get(analyses[a.fn_id].max_severity, 99) if a.fn_id in analyses else 99,
+            sev_rank.get(analyses[b.fn_id].max_severity, 99) if b.fn_id in analyses else 99,
+        )
+        # tie-break: more overlap = more interesting pair
+        return (max_sev, -len(overlap))
     pairs.sort(key=score)
     return pairs[:max_pairs]
 
