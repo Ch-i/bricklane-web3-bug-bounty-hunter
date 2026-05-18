@@ -478,6 +478,19 @@ def cmd_overview(args: argparse.Namespace) -> int:
         corpus_table.add_row("by source", sources)
         synth_n = c_stats["by_source"].get("synthesis", 0)
         corpus_table.add_row("synthesis notes", str(synth_n))
+        # List synthesis note titles — the densest knowledge in the corpus
+        synth_dir = REPO_ROOT / "corpus" / "synthesis"
+        if synth_dir.exists():
+            notes = sorted(synth_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)[:8]
+            if notes:
+                import re as _re
+                lines = []
+                for n in notes:
+                    text = n.read_text()
+                    tmatch = _re.search(r'^title:\s*"?([^"\n]+)"?', text, _re.MULTILINE)
+                    title = tmatch.group(1)[:60] if tmatch else n.stem[:60]
+                    lines.append(f"  • {title}")
+                corpus_table.add_row("recent synthesis", "\n".join(lines))
         console.print(Panel(corpus_table, title="Corpus", border_style="cyan"))
     except Exception as e:  # noqa: BLE001
         console.print(f"[dim]corpus stats unavailable: {e}[/dim]")
