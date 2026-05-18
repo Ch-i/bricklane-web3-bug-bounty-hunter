@@ -992,6 +992,62 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_autoscrutinize(args: argparse.Namespace) -> int:
+    """Pick the top suggested candidate + scrutinize it. End-to-end autonomy."""
+    from harness import scrutinize, suggest
+
+    # Step 1: pick a candidate
+    suggestions = suggest.suggest_top_n(
+        n=max(args.top, 1),
+        platform=args.platform,
+        min_stage1=args.min_stage1,
+        include_audited=False,
+        include_closed=False,
+    )
+    if not suggestions:
+        console.print("[yellow]No candidates available. Run `w3s sweep` first.[/yellow]")
+        return 1
+    picked = suggestions[0]
+    console.print(f"[bold cyan]Picked:[/bold cyan] {picked.candidate.id}  "
+                  f"(score={picked.score:.3f})  {picked.reasoning}")
+
+    cand = picked.candidate
+    if not cand.local_path:
+        console.print(f"[yellow]Candidate has no local_path — needs clone. Skipping.[/yellow]")
+        return 1
+
+    # Step 2: dry-run first (always — cheap, informs the user)
+    scope = cand.scope_paths[0] if cand.scope_paths else None
+    if args.dry_run_first or args.dry_run:
+        console.print("\n[bold]Dry-run preview:[/bold]")
+        scrutinize.scrutinize(
+            cand.local_path, scope=scope, model=args.model,
+            deep_dive_max_functions=args.max_functions,
+            dry_run=True,
+        )
+        if args.dry_run:
+            return 0
+
+    # Step 3: actual scrutinize
+    out_dir = Path(args.out).expanduser().resolve() if args.out else None
+    scrutinize.scrutinize(
+        cand.local_path,
+        scope=scope,
+        out_dir=out_dir,
+        skip_audit=args.skip_audit,
+        skip_deep_dive=args.skip_deep_dive,
+        skip_cross_fn=args.skip_cross_fn,
+        skip_materialize=args.skip_materialize,
+        skip_filter=args.skip_filter,
+        audit_multimodel=not args.single_model,
+        audit_with_pocs=not args.no_audit_pocs,
+        deep_dive_max_functions=args.max_functions,
+        materialize_min_severity=args.materialize_min_severity,
+        model=args.model,
+    )
+    return 0
+
+
 def cmd_digest(args: argparse.Namespace) -> int:
     """What did the system do in the last N hours?"""
     from harness import digest
@@ -1292,6 +1348,31 @@ def main(argv: list[str] | None = None) -> int:
     p_syn.add_argument("--no-reindex", action="store_true")
     p_syn.add_argument("--timeout", type=int, default=1800)
     p_syn.set_defaults(func=cmd_synthesize)
+
+    p_auto = sub.add_parser(
+        "autoscrutinize",
+        help="Pick the top suggested candidate + scrutinize it. One-command bounty hunt.",
+    )
+    p_auto.add_argument("--top", type=int, default=1, help="Pool size to pick from (default 1=greedy).")
+    p_auto.add_argument("--platform")
+    p_auto.add_argument("--min-stage1", type=float, default=None)
+    p_auto.add_argument("--out", help="Override scrutinize run dir.")
+    p_auto.add_argument("--model", default="opus")
+    p_auto.add_argument("--max-functions", type=int, default=None)
+    p_auto.add_argument("--materialize-min-severity", default="High",
+                        choices=["Critical", "High", "Medium"])
+    p_auto.add_argument("--single-model", action="store_true")
+    p_auto.add_argument("--no-audit-pocs", action="store_true")
+    p_auto.add_argument("--skip-audit", action="store_true")
+    p_auto.add_argument("--skip-deep-dive", action="store_true")
+    p_auto.add_argument("--skip-cross-fn", action="store_true")
+    p_auto.add_argument("--skip-materialize", action="store_true")
+    p_auto.add_argument("--skip-filter", action="store_true")
+    p_auto.add_argument("--dry-run-first", action="store_true",
+                        help="Print plan BEFORE running for real.")
+    p_auto.add_argument("--dry-run", action="store_true",
+                        help="Print plan and exit (no LLM calls).")
+    p_auto.set_defaults(func=cmd_autoscrutinize)
 
     p_digest = sub.add_parser(
         "digest",
