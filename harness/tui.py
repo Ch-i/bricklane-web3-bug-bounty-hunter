@@ -1126,6 +1126,62 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_submissions(args: argparse.Namespace) -> int:
+    """Show the submissions log as a table; filter by candidate or outcome."""
+    from harness import submissions as sub
+
+    log = sub.load_log()
+    if args.candidate_id:
+        log = [r for r in log if r.candidate_id == args.candidate_id]
+    if args.outcome:
+        log = [r for r in log if r.outcome == args.outcome]
+    if args.platform:
+        log = [r for r in log if r.platform == args.platform]
+    log.sort(key=lambda r: r.created_at, reverse=True)
+    log = log[:args.limit]
+
+    if not log:
+        console.print("[dim]No submissions match the filters. Run `w3s submit` to start logging.[/dim]")
+        return 0
+
+    t = Table(show_header=True, header_style="bold", title="Submissions")
+    t.add_column("Created", style="dim")
+    t.add_column("Candidate", style="cyan")
+    t.add_column("Platform")
+    t.add_column("Sev")
+    t.add_column("Title", overflow="fold", max_width=50)
+    t.add_column("Outcome")
+    t.add_column("Payout", justify="right")
+    for r in log:
+        outcome_color = {"accepted": "green", "duplicate": "yellow",
+                         "rejected": "red", "pending": "dim",
+                         "withdrawn": "dim"}.get(r.outcome, "")
+        payout_str = f"${r.payout_usd:,}" if r.payout_usd else "—"
+        t.add_row(
+            r.created_at[:10],
+            r.candidate_id[:30],
+            r.platform,
+            r.finding_severity,
+            r.finding_title[:50],
+            Text(r.outcome, style=outcome_color),
+            payout_str,
+        )
+    console.print(t)
+
+    # Aggregate stats
+    by_outcome: dict[str, int] = {}
+    total_paid = 0
+    for r in log:
+        by_outcome[r.outcome] = by_outcome.get(r.outcome, 0) + 1
+        if r.payout_usd:
+            total_paid += r.payout_usd
+    console.print()
+    console.print(f"[dim]Total: {len(log)}  | "
+                  f"By outcome: {', '.join(f'{k}={v}' for k, v in by_outcome.items())}  | "
+                  f"Payout: ${total_paid:,}[/dim]")
+    return 0
+
+
 def cmd_autoscrutinize(args: argparse.Namespace) -> int:
     """Pick the top suggested candidate + scrutinize it. End-to-end autonomy."""
     from harness import scrutinize, suggest
@@ -1490,6 +1546,16 @@ def main(argv: list[str] | None = None) -> int:
     p_syn.add_argument("--no-reindex", action="store_true")
     p_syn.add_argument("--timeout", type=int, default=1800)
     p_syn.set_defaults(func=cmd_synthesize)
+
+    p_subs = sub.add_parser(
+        "submissions",
+        help="Show the submissions log as a filtered table.",
+    )
+    p_subs.add_argument("--candidate-id", help="Filter to one candidate.")
+    p_subs.add_argument("--outcome", choices=["pending", "accepted", "duplicate", "rejected", "withdrawn"])
+    p_subs.add_argument("--platform", choices=["c4", "sherlock", "cantina", "immunefi"])
+    p_subs.add_argument("--limit", type=int, default=30)
+    p_subs.set_defaults(func=cmd_submissions)
 
     p_auto = sub.add_parser(
         "autoscrutinize",

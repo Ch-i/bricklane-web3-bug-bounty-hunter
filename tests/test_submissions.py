@@ -87,6 +87,60 @@ def test_render_with_no_filter_info_unchanged():
     assert out_no == out_omit
 
 
+def test_cmd_submissions_filters(tmp_path, monkeypatch, capsys):
+    """cmd_submissions should filter by candidate/outcome/platform and aggregate stats."""
+    from harness import tui
+    import argparse
+
+    log_path = tmp_path / "submissions.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {"id": "c1--bug1--c4", "candidate_id": "c1", "finding_title": "bug1",
+         "finding_severity": "High", "run_dir": "x", "platform": "c4",
+         "template_path": "x.md", "outcome": "accepted", "payout_usd": 5000,
+         "created_at": "2026-05-10T12:00:00+00:00"},
+        {"id": "c2--bug2--sherlock", "candidate_id": "c2", "finding_title": "bug2",
+         "finding_severity": "Medium", "run_dir": "y", "platform": "sherlock",
+         "template_path": "y.md", "outcome": "rejected", "payout_usd": None,
+         "created_at": "2026-05-12T12:00:00+00:00"},
+    ]
+    log_path.write_text("\n".join(__import__("json").dumps(r) for r in rows) + "\n")
+
+    monkeypatch.setattr(sub, "SUBMISSIONS_LOG", log_path)
+
+    # No filter — should show both
+    args = argparse.Namespace(candidate_id=None, outcome=None, platform=None, limit=30)
+    tui.cmd_submissions(args)
+    out = capsys.readouterr().out
+    assert "bug1" in out
+    assert "bug2" in out
+    assert "$5,000" in out
+    assert "accepted=1" in out
+    assert "rejected=1" in out
+
+    # Filter by outcome
+    args = argparse.Namespace(candidate_id=None, outcome="accepted", platform=None, limit=30)
+    tui.cmd_submissions(args)
+    out = capsys.readouterr().out
+    assert "bug1" in out
+    assert "bug2" not in out
+
+
+def test_cmd_submissions_empty_log(tmp_path, monkeypatch, capsys):
+    from harness import tui
+    import argparse
+
+    log_path = tmp_path / "empty.jsonl"
+    log_path.write_text("")
+    monkeypatch.setattr(sub, "SUBMISSIONS_LOG", log_path)
+
+    args = argparse.Namespace(candidate_id=None, outcome=None, platform=None, limit=30)
+    rc = tui.cmd_submissions(args)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "No submissions match" in out
+
+
 def test_export_run_passes_filter_info_to_renderer(tmp_path, monkeypatch):
     """End-to-end: scrutinize wrote filter info into findings.json; export
     should pass it through to the renderers."""
