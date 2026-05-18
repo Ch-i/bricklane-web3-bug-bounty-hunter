@@ -476,6 +476,38 @@ def scrutinize(
             mat_data = json.loads(materialized_path.read_text())
             all_findings.extend(mat_data)
 
+        # Also pull HIGH-severity deep-dive candidates that didn't materialize
+        # — they represent the analyzer's best hits and the filter should judge
+        # them too, not just the audit findings.
+        if deep_dive_run_dir and (deep_dive_run_dir / "per-function.jsonl").exists():
+            sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+            min_rank = sev_rank.get("High", 1)
+            for line in (deep_dive_run_dir / "per-function.jsonl").read_text().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    fn = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                fn_file = fn.get("function_id", "").split("::")[0] or "?"
+                for v in (fn.get("candidate_vulnerabilities") or []):
+                    if sev_rank.get(v.get("severity"), 99) > min_rank:
+                        continue
+                    # Shape it as a Finding-like dict so filter_agent treats it uniformly
+                    all_findings.append({
+                        "title": v.get("title", "?"),
+                        "severity": v.get("severity"),
+                        "location": [{"file": fn_file, "line_start": 1}],
+                        "description": v.get("description", "") or v.get("title", "?"),
+                        "impact": v.get("impact", "?"),
+                        "recommendation": "(see deep-dive report)",
+                        "citations": [],
+                        "novel": True,
+                        "confidence": v.get("confidence", "medium"),
+                        "discovered_by": "claude-deep-dive",
+                        "poc_status": "not-attempted",
+                    })
+
         # Dedup by title (loose)
         seen: set[str] = set()
         deduped = []

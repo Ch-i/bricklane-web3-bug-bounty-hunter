@@ -78,13 +78,9 @@ def test_resume_skips_completed_audit_phase(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(scrutinize, "filter_findings",
                         lambda *a, **kw: [], raising=False)
 
-    # Stub out filter_agent import inside scrutinize to avoid LLM
-    import sys as _sys
-    class FakeFilterAgent:
-        @staticmethod
-        def filter_findings(*a, **kw):
-            return []
-    _sys.modules["harness.filter_agent"] = FakeFilterAgent
+    # Stub out filter_agent.filter_findings on the real module to avoid LLM
+    from harness import filter_agent as _fa
+    monkeypatch.setattr(_fa, "filter_findings", lambda *a, **kw: [])
 
     scrutinize.scrutinize(str(target), out_dir=scrutinize_dir)
 
@@ -358,6 +354,77 @@ def test_dry_run_returns_none_and_doesnt_create_dir(tmp_path: Path, monkeypatch)
     new_dirs = [d for d in audits.iterdir() if d.is_dir() and "scrutinize-" in d.name and target.parent.name in d.name]
     # The dry-run path shouldn't create a run dir at all
     assert called["hit"] is False
+
+
+def test_scrutinize_filter_merges_deep_dive_high_sev_candidates(tmp_path: Path, monkeypatch):
+    """Filter phase should ingest High/Critical candidate_vulnerabilities from
+    per-function.jsonl, not just audit findings + materialized."""
+    scrutinize_dir = tmp_path / "scrut-x"
+    scrutinize_dir.mkdir()
+
+    audit_dir = tmp_path / "audit-pre"
+    audit_dir.mkdir()
+    (audit_dir / "findings.json").write_text(json.dumps([
+        {"title": "Audit-side Critical", "severity": "Critical"},
+    ]))
+    (audit_dir / "report.md").write_text("# r")
+
+    dd_dir = tmp_path / "dd-pre"
+    dd_dir.mkdir()
+    (dd_dir / "deep-dive-report.md").write_text("# dd")
+    (dd_dir / "per-function.jsonl").write_text("\n".join([
+        json.dumps({"function_id": "X.sol::X::a",
+                    "candidate_vulnerabilities": [
+                        {"title": "DD High bug", "severity": "High",
+                         "description": "d", "impact": "i", "confidence": "high"},
+                        {"title": "DD Low bug",  "severity": "Low"},  # should be dropped
+                    ]}),
+    ]))
+
+    scrutinize._save_state(scrutinize_dir, {
+        "audit_run_dir": str(audit_dir),
+        "deep_dive_run_dir": str(dd_dir),
+    })
+
+    target = tmp_path / "T.sol"
+    target.write_text("//")
+
+    captured = {"findings_seen": None}
+
+    def fake_filter_findings(findings, target_root, model="opus"):
+        captured["findings_seen"] = findings
+        for f in findings:
+            f.setdefault("filter", {"verdict": "ACCEPT", "rationale": "ok"})
+        return [(f, type("V", (), {"finding_title": f["title"], "verdict": "ACCEPT",
+                                    "rationale": "ok", "raw_response": ""})())
+                for f in findings]
+
+    # Stub filter_agent.filter_findings on the real module to avoid LLM
+    from harness import filter_agent as _fa
+    monkeypatch.setattr(_fa, "filter_findings", fake_filter_findings)
+
+    # Stub orchestrator + deep_dive so we don't spend LLM
+    monkeypatch.setattr(
+        scrutinize, "Orchestrator",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("audit re-ran")),
+    )
+    monkeypatch.setattr(
+        scrutinize.deep_dive, "run_deep_dive",
+        lambda *a, **kw: dd_dir / "deep-dive-report.md",
+    )
+    monkeypatch.setattr(
+        scrutinize.deep_dive_poc, "materialize_for_run",
+        lambda *a, **kw: tmp_path / "mat.json",
+    )
+    (tmp_path / "mat.json").write_text(json.dumps([]))
+
+    scrutinize.scrutinize(str(target), out_dir=scrutinize_dir)
+
+    titles = {f["title"] for f in captured["findings_seen"]}
+    assert "Audit-side Critical" in titles
+    assert "DD High bug" in titles
+    # Low-severity DD findings should be filtered out at the High threshold
+    assert "DD Low bug" not in titles
 
 
 def test_cli_defaults_to_full_pipeline():
