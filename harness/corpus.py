@@ -249,30 +249,50 @@ def reindex(
 ) -> IngestResult:
     """Drop + recreate the sqlite index from the on-disk markdown corpus.
 
-    This is the canonical way to refresh after manual edits to corpus/*.md.
+    Atomic: builds the new index in a temp file and renames over the
+    canonical path only on success. If killed mid-build, the existing
+    DB is preserved — no more "killed during reindex left me with an
+    empty corpus".
+
     Embeddings are NOT rebuilt here — embed via ``scripts/ingest_md.py --embed``.
     """
     root = corpus_root or corpus_dir()
     p = db or db_path()
-    if p.exists():
-        p.unlink()
-    init_db(p)
+
+    # Build into a sibling temp file
+    tmp = p.with_suffix(p.suffix + ".reindex.tmp")
+    if tmp.exists():
+        tmp.unlink()
 
     result = IngestResult(inserted=0, updated=0, skipped=0, errors=[])
-    with connect(p) as conn:
-        for path in sorted(root.rglob("*.md")):
-            if path.name.startswith("_"):
-                result.skipped += 1
-                continue
-            try:
-                fm, body = parse_entry(path)
-                action = upsert_entry(conn, fm, body, path)
-                if action == "inserted":
-                    result.inserted += 1
-                else:
-                    result.updated += 1
-            except Exception as e:  # noqa: BLE001
-                result.errors.append((path, str(e)))
+    try:
+        init_db(tmp)
+        with connect(tmp) as conn:
+            for path in sorted(root.rglob("*.md")):
+                if path.name.startswith("_"):
+                    result.skipped += 1
+                    continue
+                try:
+                    fm, body = parse_entry(path)
+                    action = upsert_entry(conn, fm, body, path)
+                    if action == "inserted":
+                        result.inserted += 1
+                    else:
+                        result.updated += 1
+                except Exception as e:  # noqa: BLE001
+                    result.errors.append((path, str(e)))
+        # Success — atomically replace the live DB with the temp one
+        # (os.replace is atomic on POSIX even when target exists)
+        import os as _os
+        _os.replace(tmp, p)
+    except BaseException:
+        # On any failure (including KeyboardInterrupt), leave the existing DB
+        # intact and remove the temp.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
     return result
 
 
