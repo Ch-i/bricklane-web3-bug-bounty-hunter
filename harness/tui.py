@@ -523,16 +523,29 @@ def cmd_latest(args: argparse.Namespace) -> int:
     audits_root = REPO_ROOT / "audits"
     if not audits_root.exists():
         return 1
-    # Filter to the requested kind, or all kinds
+
+    def is_audit(p: Path) -> bool:
+        return (p / "prep.json").exists()
+
+    def is_scrutinize(p: Path) -> bool:
+        return p.name.startswith("scrutinize-") or (p / "scrutinize-report.md").exists()
+
+    def is_deep_dive(p: Path) -> bool:
+        return p.name.startswith("deep-dive-") or (p / "deep-dive-report.md").exists()
+
     candidates = []
     for p in audits_root.iterdir():
         if not p.is_dir():
             continue
-        if args.kind == "audit" and not (p / "prep.json").exists():
+        a, s, d = is_audit(p), is_scrutinize(p), is_deep_dive(p)
+        if args.kind == "audit" and not a:
             continue
-        if args.kind == "scrutinize" and not p.name.startswith("scrutinize-"):
+        if args.kind == "scrutinize" and not s:
             continue
-        if args.kind == "deep-dive" and not p.name.startswith("deep-dive-"):
+        if args.kind == "deep-dive" and not d:
+            continue
+        if args.kind == "any" and not (a or s or d):
+            # Skip stray side-effect dirs like synthesize-*
             continue
         candidates.append(p)
     if not candidates:
