@@ -108,10 +108,35 @@ def _recent_audit_runs(since: datetime) -> list[dict]:
                 fs_list = fs if isinstance(fs, list) else fs.get("findings", [])
                 meta["n_findings"] = len(fs_list)
                 meta["has_pocs"] = any(f.get("poc_status") == "reproduced" for f in fs_list)
+            # Deep-dive runs surface per-function candidate counts
+            if (p / "per-function.jsonl").exists():
+                n_fn = 0
+                total_vulns = 0
+                high_crit = 0
+                for line in (p / "per-function.jsonl").read_text().splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        fn = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    n_fn += 1
+                    for v in (fn.get("candidate_vulnerabilities") or []):
+                        total_vulns += 1
+                        if v.get("severity") in ("Critical", "High"):
+                            high_crit += 1
+                meta["n_functions"] = n_fn
+                meta["n_candidates"] = total_vulns
+                meta["n_high_crit"] = high_crit
+                # If no findings.json, expose candidates as the headline number
+                if meta["n_findings"] is None:
+                    meta["n_findings"] = total_vulns
         except (json.JSONDecodeError, OSError):
             pass
         if (p / "scrutinize-report.md").exists():
             meta["has_master_report"] = True
+        if (p / "invariants.md").exists():
+            meta["has_invariants"] = True
         out.append(meta)
     out.sort(key=lambda m: m["mtime"], reverse=True)
     return out
@@ -224,17 +249,25 @@ def render_digest(digest: dict) -> None:
         console.print(f"\n[bold cyan]Audit runs[/bold cyan]: {len(runs)} new")
         rt = Table(show_header=True, header_style="bold")
         rt.add_column("Kind", style="dim")
-        rt.add_column("Run", style="cyan", overflow="fold", max_width=50)
-        rt.add_column("Findings", justify="right")
+        rt.add_column("Run", style="cyan", overflow="fold", max_width=46)
+        rt.add_column("#Fn/Findings", justify="right")
+        rt.add_column("H/C", justify="right")
         rt.add_column("PoCs?", justify="center")
         rt.add_column("Report?", justify="center")
         for r in runs[:10]:
+            # For deep-dive, show "N fn → M cand"; for audit, show "M findings"
+            if r["kind"] == "deep-dive" and r.get("n_functions") is not None:
+                count_cell = f"{r['n_functions']}fn→{r.get('n_candidates', 0)}"
+            else:
+                count_cell = str(r["n_findings"] if r["n_findings"] is not None else "—")
+            hc = str(r.get("n_high_crit", "")) if r.get("n_high_crit") is not None else ""
             rt.add_row(
                 r["kind"],
                 r["name"],
-                str(r["n_findings"] if r["n_findings"] is not None else "—"),
+                count_cell,
+                hc,
                 "✓" if r["has_pocs"] else "—",
-                "✓" if r["has_master_report"] else "—",
+                "✓" if r["has_master_report"] or r.get("has_invariants") else "—",
             )
         console.print(rt)
 
