@@ -434,6 +434,33 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 0
 
 
+def cmd_latest(args: argparse.Namespace) -> int:
+    """Print the path to the most recent run (audit / scrutinize / deep-dive).
+
+    Useful for shell pipelines: `cat $(w3s latest)/report.md`
+    """
+    audits_root = REPO_ROOT / "audits"
+    if not audits_root.exists():
+        return 1
+    # Filter to the requested kind, or all kinds
+    candidates = []
+    for p in audits_root.iterdir():
+        if not p.is_dir():
+            continue
+        if args.kind == "audit" and not (p / "prep.json").exists():
+            continue
+        if args.kind == "scrutinize" and not p.name.startswith("scrutinize-"):
+            continue
+        if args.kind == "deep-dive" and not p.name.startswith("deep-dive-"):
+            continue
+        candidates.append(p)
+    if not candidates:
+        return 1
+    latest = max(candidates, key=lambda p: p.stat().st_mtime)
+    print(latest)
+    return 0
+
+
 def cmd_overview(args: argparse.Namespace) -> int:
     """At-a-glance dashboard: corpus + queue + recent audits + submissions."""
     from harness import candidates as cand_store
@@ -1241,6 +1268,14 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("--chain", default="mainnet")
     p_replay.add_argument("--out", help="Write trace to file instead of stdout.")
     p_replay.set_defaults(func=cmd_replay)
+
+    p_latest = sub.add_parser(
+        "latest",
+        help="Print path to the latest run dir (for shell pipelines).",
+    )
+    p_latest.add_argument("--kind", choices=["audit", "scrutinize", "deep-dive", "any"],
+                          default="any")
+    p_latest.set_defaults(func=cmd_latest)
 
     p_over = sub.add_parser(
         "overview",
