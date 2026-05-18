@@ -508,6 +508,63 @@ def scrutinize(
                         "poc_status": "not-attempted",
                     })
 
+        # Also pull CROSS-FUNCTION vulnerabilities — these are often the
+        # highest-value bugs (multi-fn reentrancy, invariant violations) that
+        # only emerge from the pair-wise pass.
+        if deep_dive_run_dir and (deep_dive_run_dir / "cross-function.jsonl").exists():
+            sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+            for line in (deep_dive_run_dir / "cross-function.jsonl").read_text().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    pair = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pair_id = pair.get("pair_id", "?+?")
+                # Use the first function's file as the location anchor
+                first_fn = pair_id.split("+")[0] if "+" in pair_id else pair_id
+                pair_file = first_fn.split("::")[0] or "?"
+                for v in (pair.get("vulnerabilities") or []):
+                    if sev_rank.get(v.get("severity"), 99) > 1:  # High threshold
+                        continue
+                    all_findings.append({
+                        "title": f"[Cross-fn] {v.get('title', '?')}",
+                        "severity": v.get("severity"),
+                        "location": [{"file": pair_file, "line_start": 1}],
+                        "description": (
+                            f"Pair: {pair_id}\n"
+                            f"Sequence: {v.get('sequence', '?')}\n"
+                            f"{v.get('description', '') or v.get('title', '?')}"
+                        ),
+                        "impact": v.get("impact", "?"),
+                        "recommendation": "(see deep-dive report cross-fn section)",
+                        "citations": [],
+                        "novel": True,
+                        "confidence": v.get("confidence", "medium"),
+                        "discovered_by": "claude-deep-dive-cross-fn",
+                        "poc_status": "not-attempted",
+                    })
+                # Also: each broken_invariant entry should be evaluated
+                for bi in (pair.get("broken_invariants") or []):
+                    all_findings.append({
+                        "title": f"[Invariant break] {bi.get('invariant', '?')[:80]}",
+                        "severity": "High",  # invariant breakage defaults High
+                        "location": [{"file": pair_file, "line_start": 1}],
+                        "description": (
+                            f"Pair: {pair_id}\n"
+                            f"Invariant: {bi.get('invariant', '?')}\n"
+                            f"Broken by: {bi.get('broken_by', '?')}\n"
+                            f"How: {bi.get('how', '?')}"
+                        ),
+                        "impact": "Invariant breakage — see broken_by + how fields.",
+                        "recommendation": "(see deep-dive invariants.md)",
+                        "citations": [],
+                        "novel": True,
+                        "confidence": "medium",
+                        "discovered_by": "claude-deep-dive-invariants",
+                        "poc_status": "not-attempted",
+                    })
+
         # Dedup by title (loose)
         seen: set[str] = set()
         deduped = []

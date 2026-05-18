@@ -427,6 +427,86 @@ def test_scrutinize_filter_merges_deep_dive_high_sev_candidates(tmp_path: Path, 
     assert "DD Low bug" not in titles
 
 
+def test_scrutinize_filter_merges_cross_function_vulnerabilities(tmp_path: Path, monkeypatch):
+    """Cross-fn vulnerabilities + broken_invariants must reach the filter pass."""
+    scrutinize_dir = tmp_path / "scrut-cross"
+    scrutinize_dir.mkdir()
+
+    audit_dir = tmp_path / "audit-pre"
+    audit_dir.mkdir()
+    (audit_dir / "findings.json").write_text(json.dumps([]))
+    (audit_dir / "report.md").write_text("# r")
+
+    dd_dir = tmp_path / "dd-pre"
+    dd_dir.mkdir()
+    (dd_dir / "deep-dive-report.md").write_text("# dd")
+    (dd_dir / "per-function.jsonl").write_text("")
+    (dd_dir / "cross-function.jsonl").write_text("\n".join([
+        json.dumps({
+            "pair_id": "V.sol::V::deposit+V.sol::V::withdraw",
+            "shared_state": ["balances"],
+            "interaction_kind": "shares-state",
+            "vulnerabilities": [
+                {"title": "Multi-fn reentrancy via balances", "severity": "Critical",
+                 "sequence": "A calls withdraw → callback → deposit",
+                 "description": "balances mutated between check and call",
+                 "impact": "drain", "confidence": "high"},
+                {"title": "Low cross issue", "severity": "Low"},  # below threshold
+            ],
+            "broken_invariants": [
+                {"invariant": "totalSupply == sum(balances)",
+                 "broken_by": "withdraw",
+                 "how": "decrements balances without updating totalSupply"},
+            ],
+        }),
+    ]))
+
+    scrutinize._save_state(scrutinize_dir, {
+        "audit_run_dir": str(audit_dir),
+        "deep_dive_run_dir": str(dd_dir),
+    })
+
+    target = tmp_path / "T.sol"
+    target.write_text("//")
+
+    captured = {"findings_seen": None}
+
+    def fake_filter_findings(findings, target_root, model="opus"):
+        captured["findings_seen"] = findings
+        for f in findings:
+            f.setdefault("filter", {"verdict": "ACCEPT", "rationale": "ok"})
+        return [(f, type("V", (), {"finding_title": f["title"], "verdict": "ACCEPT",
+                                    "rationale": "ok", "raw_response": ""})())
+                for f in findings]
+
+    from harness import filter_agent as _fa
+    monkeypatch.setattr(_fa, "filter_findings", fake_filter_findings)
+
+    monkeypatch.setattr(
+        scrutinize, "Orchestrator",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("audit re-ran")),
+    )
+    monkeypatch.setattr(
+        scrutinize.deep_dive, "run_deep_dive",
+        lambda *a, **kw: dd_dir / "deep-dive-report.md",
+    )
+    monkeypatch.setattr(
+        scrutinize.deep_dive_poc, "materialize_for_run",
+        lambda *a, **kw: tmp_path / "mat.json",
+    )
+    (tmp_path / "mat.json").write_text(json.dumps([]))
+
+    scrutinize.scrutinize(str(target), out_dir=scrutinize_dir)
+
+    titles = {f["title"] for f in captured["findings_seen"]}
+    # Cross-fn vulnerability prefixed with [Cross-fn] should be present
+    assert any("[Cross-fn] Multi-fn reentrancy" in t for t in titles)
+    # Broken invariant should be present as its own finding
+    assert any("[Invariant break]" in t for t in titles)
+    # Low cross issue (below threshold) should NOT be present
+    assert not any("Low cross issue" in t for t in titles)
+
+
 def test_cli_defaults_to_full_pipeline():
     """`w3s scrutinize <target>` with no flags should enable every phase."""
     captured: dict = {}
