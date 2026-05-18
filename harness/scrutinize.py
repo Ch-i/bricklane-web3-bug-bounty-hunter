@@ -78,6 +78,34 @@ def _section(title: str, n: int, total: int, elapsed: int) -> None:
     ))
 
 
+def _top_actionable_findings(filter_results_path: Path | None, max_n: int = 10) -> list[dict]:
+    """Rank ACCEPT'd findings for the master report's top section.
+
+    Sort key: severity × confidence × ACCEPT-verdict. Critical+high-conf
+    ACCEPT'd findings float to the top.
+    """
+    if not filter_results_path or not filter_results_path.exists():
+        return []
+    try:
+        data = json.loads(filter_results_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    findings = data if isinstance(data, list) else data.get("findings", [])
+    sev_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4, "Informational": 4}
+    conf_rank = {"high": 0, "medium": 1, "low": 2, "speculative": 3}
+
+    def score(f: dict) -> tuple:
+        verdict = (f.get("filter") or {}).get("verdict", "—")
+        # ACCEPT first, then DOWNGRADE, REJECT/ERROR last
+        v_rank = {"ACCEPT": 0, "DOWNGRADE": 1}.get(verdict, 2)
+        sev = sev_rank.get(f.get("severity"), 99)
+        conf = conf_rank.get(f.get("confidence"), 99)
+        return (v_rank, sev, conf)
+
+    findings_sorted = sorted(findings, key=score)
+    return findings_sorted[:max_n]
+
+
 def _master_report(
     *,
     target: Path,
@@ -97,6 +125,34 @@ def _master_report(
     parts.append(f"- Target: `{target}`")
     parts.append(f"- Total wall time: {elapsed_s}s ({elapsed_s // 60}m {elapsed_s % 60}s)")
     parts.append("")
+
+    # ===== TOP ACTIONABLE FINDINGS — first thing the user reads =====
+    top_findings = _top_actionable_findings(filter_results_path, max_n=10)
+    if top_findings:
+        parts.append("## 🎯 Top actionable findings")
+        parts.append("")
+        parts.append("_Ranked: verdict → severity → confidence. ACCEPT'd findings first._")
+        parts.append("")
+        for i, f in enumerate(top_findings, 1):
+            verdict = (f.get("filter") or {}).get("verdict", "—")
+            sym = {"ACCEPT": "✓", "DOWNGRADE": "↓", "REJECT": "✗", "ERROR": "!"}.get(verdict, "·")
+            sev = f.get("severity", "?")
+            conf = f.get("confidence", "?")
+            disc = f.get("discovered_by", "?")
+            parts.append(f"### {i}. {sym} `[{sev}/{conf}]` {f.get('title', '?')}")
+            rationale = (f.get("filter") or {}).get("rationale", "")
+            if rationale:
+                parts.append(f"  - **filter:** {verdict} — {rationale}")
+            parts.append(f"  - **discovered by:** `{disc}`")
+            impact = f.get("impact", "")
+            if impact and impact != "?":
+                parts.append(f"  - **impact:** {impact[:200]}")
+            poc_status = f.get("poc_status")
+            if poc_status and poc_status not in ("not-attempted", "not-applicable"):
+                parts.append(f"  - **PoC status:** {poc_status}")
+            parts.append("")
+        parts.append("---")
+        parts.append("")
 
     # Phase 1: Audit summary
     parts.append("## 1. Multi-model audit")

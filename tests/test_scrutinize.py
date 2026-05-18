@@ -90,6 +90,74 @@ def test_resume_skips_completed_audit_phase(tmp_path: Path, monkeypatch):
     assert (scrutinize_dir / "scrutinize-report.md").exists()
 
 
+def test_top_actionable_findings_orders_by_verdict_then_severity(tmp_path: Path):
+    """ACCEPT'd Critical should come before DOWNGRADE'd Critical, which comes
+    before ACCEPT'd Medium."""
+    filter_path = tmp_path / "filter.json"
+    filter_path.write_text(json.dumps([
+        {"title": "Reject crit", "severity": "Critical", "confidence": "high",
+         "filter": {"verdict": "REJECT", "rationale": "FP"}},
+        {"title": "Accept high", "severity": "High", "confidence": "medium",
+         "filter": {"verdict": "ACCEPT", "rationale": "ok"}},
+        {"title": "Downgrade crit", "severity": "Critical", "confidence": "high",
+         "filter": {"verdict": "DOWNGRADE", "rationale": "downgrade"}},
+        {"title": "Accept crit hi conf", "severity": "Critical", "confidence": "high",
+         "filter": {"verdict": "ACCEPT", "rationale": "real"}},
+        {"title": "Accept crit lo conf", "severity": "Critical", "confidence": "low",
+         "filter": {"verdict": "ACCEPT", "rationale": "real"}},
+    ]))
+    top = scrutinize._top_actionable_findings(filter_path)
+    titles = [f["title"] for f in top]
+    # ACCEPT'd Critical high-conf wins
+    assert titles[0] == "Accept crit hi conf"
+    # ACCEPT'd Critical low-conf next
+    assert titles[1] == "Accept crit lo conf"
+    # ACCEPT'd High next
+    assert titles[2] == "Accept high"
+    # DOWNGRADE'd Critical next
+    assert titles[3] == "Downgrade crit"
+    # REJECT'd last
+    assert titles[-1] == "Reject crit"
+
+
+def test_top_actionable_findings_returns_empty_when_missing(tmp_path: Path):
+    assert scrutinize._top_actionable_findings(None) == []
+    assert scrutinize._top_actionable_findings(tmp_path / "missing.json") == []
+
+
+def test_top_actionable_findings_handles_corrupt_json(tmp_path: Path):
+    p = tmp_path / "filter.json"
+    p.write_text("not valid json")
+    assert scrutinize._top_actionable_findings(p) == []
+
+
+def test_master_report_surfaces_top_actionable_section(tmp_path: Path):
+    target = tmp_path / "Target.sol"
+    target.write_text("//")
+    filter_path = tmp_path / "filter.json"
+    filter_path.write_text(json.dumps([
+        {"title": "Critical drain via reentrancy", "severity": "Critical",
+         "confidence": "high",
+         "filter": {"verdict": "ACCEPT", "rationale": "real funds at risk"},
+         "discovered_by": "claude", "impact": "drains contract", "poc_status": "reproduced"},
+    ]))
+    out = scrutinize._master_report(
+        target=target,
+        scrutinize_dir=tmp_path,
+        audit_run_dir=None,
+        deep_dive_run_dir=None,
+        filter_results_path=filter_path,
+        materialized_path=None,
+        elapsed_s=5,
+    )
+    body = out.read_text()
+    assert "Top actionable findings" in body
+    assert "Critical drain via reentrancy" in body
+    assert "real funds at risk" in body
+    assert "drains contract" in body
+    assert "reproduced" in body
+
+
 def test_master_report_with_all_phases(tmp_path: Path):
     scrutinize_dir = tmp_path / "scrutinize-run"
     scrutinize_dir.mkdir()
