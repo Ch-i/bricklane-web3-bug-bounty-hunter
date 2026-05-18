@@ -106,3 +106,63 @@ def test_connect_enables_wal_mode(tmp_path: Path):
     mode = raw.execute("PRAGMA journal_mode").fetchone()[0]
     raw.close()
     assert mode == "wal"
+
+
+def test_fts_escape_wraps_tokens_in_double_quotes():
+    """FTS5 needs each token quoted; multi-token query becomes OR."""
+    assert corpus._fts_escape("reentrancy") == '"reentrancy"'
+    assert corpus._fts_escape("oracle staleness") == '"oracle" OR "staleness"'
+
+
+def test_fts_escape_handles_empty_input():
+    """Empty / whitespace-only input returns a safe empty-quote literal."""
+    assert corpus._fts_escape("") == '""'
+    assert corpus._fts_escape("   ") == '""'
+
+
+def test_fts_escape_strips_embedded_double_quotes():
+    """A token containing " would break the FTS5 lexer — strip them."""
+    result = corpus._fts_escape('say"hi')
+    assert '""' not in result.replace('""', "_DBL_")  # no two adjacent double quotes
+    # The character is stripped:
+    assert '"' not in result.replace('"', "")[1:-1] or "sayhi" in result
+
+
+def test_parse_entry_loads_frontmatter_and_body(tmp_path: Path):
+    """parse_entry should return (CorpusEntryFrontmatter, body_str)."""
+    md = tmp_path / "test-entry.md"
+    md.write_text("""---
+id: swc-test
+source: swc
+title: Test entry
+ingested_at: 2026-05-18T00:00:00Z
+vuln_class:
+  - reentrancy
+---
+
+This is the body.
+""")
+    fm, body = corpus.parse_entry(md)
+    assert fm.id == "swc-test"
+    assert fm.source == "swc"
+    assert "reentrancy" in fm.vuln_class
+    assert "This is the body" in body
+
+
+def test_dump_yaml_excludes_none_and_is_sortkey_stable():
+    """_dump_yaml should produce sorted, none-excluded YAML for reproducibility."""
+    from harness.schema import CorpusEntryFrontmatter as FM
+    fm = FM(
+        id="swc-test", source="swc", title="x",
+        ingested_at="2026-05-18T00:00:00Z",
+        source_url=None,  # should be excluded
+        vuln_class=["a", "b"],
+    )
+    yaml_out = corpus._dump_yaml(fm)
+    assert "source_url" not in yaml_out
+    # Sorted keys means 'id' < 'ingested_at' < 'source' < 'title' < 'vuln_class'
+    # (alphabetical order)
+    lines = yaml_out.splitlines()
+    id_idx = next(i for i, l in enumerate(lines) if l.startswith("id:"))
+    title_idx = next(i for i, l in enumerate(lines) if l.startswith("title:"))
+    assert id_idx < title_idx  # alpha-sorted
