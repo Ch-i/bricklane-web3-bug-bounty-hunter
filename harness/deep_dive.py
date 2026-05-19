@@ -328,11 +328,25 @@ def decompose(target_root: Path, scope: Path | None = None) -> list[FunctionUnit
             return decompose_file(walk_root, anchor)
         except Exception:  # noqa: BLE001
             return []
-    skip_segments = {"lib", "node_modules", "out", "cache", "test", "scripts", "__web3sentinel_pocs__"}
+    # `lib`, `node_modules`, `out`, `cache`, `scripts` are skipped ONLY when they
+    # appear at the TOP LEVEL of the PROJECT (target_root). The standard forge
+    # layout puts external deps in `<project>/lib/`. Subdirectories named `lib/`
+    # deeper in the source tree (e.g. `src/lib/MyMath.sol` or `silo-core/contracts/lib/`)
+    # are real project code and must be analyzed.
+    # `test` and the auto-PoC dir are always skipped wherever they appear.
+    top_skip = {"lib", "node_modules", "out", "cache", "scripts"}
+    any_skip = {"test", "__web3sentinel_pocs__"}
     units: list[FunctionUnit] = []
     anchor = target_root if target_root.is_dir() else target_root.parent
+    project_root = target_root if target_root.is_dir() else target_root.parent
     for p in sorted(walk_root.rglob("*.sol")):
-        if any(seg in p.parts for seg in skip_segments):
+        try:
+            rel_parts = p.relative_to(project_root).parts
+        except ValueError:
+            rel_parts = p.parts
+        if rel_parts and rel_parts[0] in top_skip:
+            continue
+        if any(seg in any_skip for seg in rel_parts):
             continue
         try:
             units.extend(decompose_file(p, anchor))

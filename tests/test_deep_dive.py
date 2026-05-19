@@ -94,6 +94,38 @@ def test_decompose_skips_libs_and_tests(tmp_path):
     assert not any("T.sol" in i for i in fn_ids)
 
 
+def test_decompose_includes_nested_lib_subdir(tmp_path):
+    """A project's own `lib/` subdirectory (e.g. `src/contracts/lib/MyMath.sol`)
+    is real source code, not external deps. Must be analyzed.
+
+    The skip only applies to the TOP-LEVEL `lib/` (forge's external-dep dir).
+    Regression test for the Silo V3 finding where Silo's math libraries at
+    `silo-core/contracts/lib/SiloLendingLib.sol` were silently excluded.
+    """
+    _write(tmp_path, "src/A.sol", "contract A { function a() public {} }")
+    _write(tmp_path, "lib/external.sol", "contract Ext { function e() public {} }")  # forge dep
+    _write(tmp_path, "src/lib/MyMath.sol", "contract MyMath { function m() public {} }")  # project lib
+    _write(tmp_path, "src/contracts/lib/Deep.sol", "contract Deep { function d() public {} }")  # nested project lib
+    units = decompose(tmp_path)
+    fn_ids = {u.fn_id for u in units}
+    assert any("A.sol" in i for i in fn_ids)
+    assert not any("external.sol" in i for i in fn_ids), "top-level lib/ should be skipped"
+    assert any("MyMath.sol" in i for i in fn_ids), "src/lib/ is project code"
+    assert any("Deep.sol" in i for i in fn_ids), "deeper lib/ paths are project code too"
+
+
+def test_decompose_skips_test_dir_at_any_depth(tmp_path):
+    """`test/` should be skipped wherever it appears (not just top-level)."""
+    _write(tmp_path, "src/A.sol", "contract A { function a() public {} }")
+    _write(tmp_path, "test/Foo.t.sol", "contract FooTest { function f() public {} }")
+    _write(tmp_path, "src/test/Inner.t.sol", "contract InnerTest { function i() public {} }")
+    units = decompose(tmp_path)
+    fn_ids = {u.fn_id for u in units}
+    assert any("A.sol" in i for i in fn_ids)
+    assert not any("Foo.t.sol" in i for i in fn_ids)
+    assert not any("Inner.t.sol" in i for i in fn_ids)
+
+
 def test_decompose_extracts_danger_grep(tmp_path):
     src = '''
 contract Risky {
