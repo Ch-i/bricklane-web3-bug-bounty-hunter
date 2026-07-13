@@ -3,13 +3,25 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "web3sentinel"
-version = "0.0.1"
-description = "Smart contract & web3 audit harness with an autoresearch corpus loop"
+name = "bricklane"
+version = "0.1.0"
+description = "AI-native Web3 bug bounty hunter and security harness grounded in an exploit corpus"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "web3Sentinel" }]
+authors = [{ name = "Bricklane Contributors" }]
+keywords = ["smart-contract", "security", "audit", "web3", "ai-native", "defi", "solidity", "vulnerability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
 
 dependencies = [
     "pydantic>=2.7",
@@ -25,6 +37,12 @@ dependencies = [
     "platformdirs>=4.2",
     "numpy>=1.26",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ch-i/bricklane-web3-bug-bounty-hunter"
+Repository = "https://github.com/ch-i/bricklane-web3-bug-bounty-hunter"
+Issues = "https://github.com/ch-i/bricklane-web3-bug-bounty-hunter/issues"
+Documentation = "https://github.com/ch-i/bricklane-web3-bug-bounty-hunter#readme"
 
 [project.optional-dependencies]
 # Local embedding model. Heavy install; opt-in.
@@ -59,11 +77,17 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
+ui = [
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.0",
+]
 
 [project.scripts]
-web3sentinel-mcp = "mcp_server.server:main"
-web3sentinel-ingest = "scripts.ingest_md:main"
-web3sentinel-seed-swc = "scripts.seed_swc:main"
+bricklane-mcp = "mcp_server.server:main"
+bricklane-ingest = "scripts.ingest_md:main"
+bricklane-seed-swc = "scripts.seed_swc:main"
+bricklane = "harness.tui:main"
+bl = "harness.tui:main"
 w3s = "harness.tui:main"
 
 [tool.hatch.build.targets.wheel]

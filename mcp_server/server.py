@@ -1,4 +1,4 @@
-"""web3sentinel-corpus MCP server.
+"""bricklane-corpus MCP server.
 
 Exposes the corpus index over the Model Context Protocol so Claude Code
 subagents and the Codex CLI both consume the same retrieval surface.
@@ -7,7 +7,7 @@ Run directly:
     python -m mcp_server.server          # stdio transport (default for Claude Code)
 
 Or as the installed entry point:
-    uv run web3sentinel-mcp
+    uv run bricklane-mcp
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from mcp.server.fastmcp import FastMCP
 
 from harness import corpus as corpus_mod
 
-mcp = FastMCP("web3sentinel-corpus")
+mcp = FastMCP("bricklane-corpus")
 
 
 def _env_exclude_ids() -> list[str]:

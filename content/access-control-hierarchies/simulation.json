@@ -1,0 +1,81 @@
+{
+  "title": "Privilege Escalation via Missing Access Control",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "Contract", "Owner"],
+  "incidents": [
+    {
+      "name": "Poly Network",
+      "date": "2021-08-10",
+      "chain": "Ethereum",
+      "loss_usd": "$611M",
+      "attacker": "0xC8a65Fadf0e0dDAf421F28FEAb69Bf6E2E589963",
+      "tx_hash": "0xb1f7e4062d4fa78630d39d3fecbedae025c1b2cb0a7d0f3a05f5d709b49da3ec",
+      "block": 12996659,
+      "etherscan": "https://etherscan.io/tx/0xb1f7e4062d4fa78630d39d3fecbedae025c1b2cb0a7d0f3a05f5d709b49da3ec"
+    }
+  ],
+  "initial_state": {
+    "contract_balance": "5,000 ETH ($10,000,000)",
+    "owner": "0xLegitOwner (deployer)",
+    "fee_recipient": "0xProtocolFeeWallet",
+    "withdrawal_limit": "100 ETH per day",
+    "admin_functions": "setFeeRecipient(), setWithdrawalLimit(), emergencyWithdraw()",
+    "access_control": "⚠️ onlyOwner missing on emergencyWithdraw()"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "Contract",
+      "action": "scan_for_unprotected_functions()",
+      "description": "Attacker analyzes the contract's ABI and bytecode, discovering that emergencyWithdraw() is an external function without the onlyOwner modifier. While setFeeRecipient() and setWithdrawalLimit() are properly protected, this critical function was accidentally left open — a common copy-paste error during development.",
+      "code": "// Contract source analysis reveals the vulnerability\ncontract Vault {\n    address public owner;\n    modifier onlyOwner() {\n        require(msg.sender == owner, \"Not owner\");\n        _;\n    }\n\n    function setFeeRecipient(address _new) external onlyOwner { ... } // ✓ Protected\n    function setWithdrawalLimit(uint _limit) external onlyOwner { ... } // ✓ Protected\n\n    // ⚠️ MISSING onlyOwner modifier!\n    function emergencyWithdraw(address token, uint256 amount) external {\n        IERC20(token).transfer(msg.sender, amount);\n    }\n}",
+      "state_changes": {
+        "vulnerability_found": "⚠️ emergencyWithdraw() callable by anyone",
+        "function_visibility": "⚠️ external (no access restriction)",
+        "attack_surface": "⚠️ Direct fund extraction possible"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "Contract",
+      "action": "emergencyWithdraw(WETH, 5000 ether)",
+      "description": "Attacker calls the unprotected emergencyWithdraw function, passing WETH as the token and the entire contract balance as the amount. Since there is no access control check, the transaction succeeds and transfers all 5,000 ETH to the attacker's address.",
+      "code": "// Attacker drains entire balance in one call\ninterface IVault {\n    function emergencyWithdraw(address token, uint256 amount) external;\n}\n\nIVault(vault).emergencyWithdraw(\n    WETH_ADDRESS,\n    5_000 ether  // entire balance\n);\n// ✓ Transaction succeeds — no access control!\n// Attacker receives 5,000 ETH ($10,000,000)",
+      "state_changes": {
+        "contract_balance": "⚠️ 0 ETH (was 5,000 ETH)",
+        "attacker_balance": "💰 5,000 ETH ($10,000,000)",
+        "withdrawal_limit_bypass": "⚠️ 100 ETH/day limit irrelevant — emergencyWithdraw has none"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Owner",
+      "to": "Contract",
+      "action": "pause() [TOO LATE]",
+      "description": "The legitimate owner detects the unauthorized withdrawal through monitoring alerts, but the funds are already gone. Even if the contract has a pause mechanism, it cannot recover the stolen funds. The owner can only prevent further damage to any remaining tokens.",
+      "code": "// Owner reacts — but it's too late\ncontract Vault {\n    bool public paused;\n\n    function pause() external onlyOwner {\n        paused = true;\n        emit Paused(msg.sender);\n    }\n\n    // Even if they add a fix:\n    function emergencyWithdraw(address token, uint256 amount) \n        external \n        onlyOwner  // ← Fix: add modifier\n        whenNotPaused \n    {\n        IERC20(token).transfer(msg.sender, amount);\n    }\n}\n// ⚠️ Cannot be applied retroactively without upgrade mechanism",
+      "state_changes": {
+        "contract_paused": "✓ True (prevents further calls)",
+        "funds_recoverable": "⚠️ No — already transferred to attacker",
+        "remaining_tokens": "✓ Any non-WETH tokens are safe (if pause works)"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "launder_and_profit()",
+      "description": "Attacker launders the $10M through DEX swaps, cross-chain bridges, and mixing services. The root cause — a missing onlyOwner modifier on a single function — resulted in total loss of funds. This class of vulnerability is preventable with automated access control audits and comprehensive test coverage.",
+      "code": "// Attack summary:\n// Cost: ~$50 in gas fees\n// Profit: $10,000,000\n// Time: ~1 minute (1-2 transactions)\n// Complexity: Trivial\n\n// Prevention checklist:\n// ✓ Apply onlyOwner to ALL admin functions\n// ✓ Use OpenZeppelin AccessControl for role-based access\n// ✓ Automated modifier checks in CI/CD\n// ✓ 100% test coverage for access control\n// ✓ Slither/Mythril static analysis\n\n// Example fix using OpenZeppelin:\n// function emergencyWithdraw(...) \n//     external \n//     onlyRole(EMERGENCY_ROLE) \n//     { ... }",
+      "state_changes": {
+        "attacker_profit": "💰 $10,000,000 (minus ~$50 gas)",
+        "protocol_loss": "⚠️ $10,000,000 (100% of TVL)",
+        "root_cause": "⚠️ Single missing modifier: onlyOwner",
+        "lesson": "Every privileged function must have explicit access control"
+      }
+    }
+  ]
+}

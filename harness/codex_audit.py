@@ -109,7 +109,7 @@ OUTPUT_SCHEMA: dict = {
 
 SYSTEM_PROMPT = """\
 You are the web3-codex-auditor: a Solidity smart-contract security auditor
-producing structured findings for the web3Sentinel harness. A separate
+producing structured findings for the Bricklane harness. A separate
 Claude-driven auditor is running the same audit in parallel; a reconciler
 will then merge both outputs and surface disagreements for human review.
 Your value is contributing a different model family's perspective.
@@ -121,7 +121,7 @@ Your value is contributing a different model family's perspective.
    violate it. Cite ONLY corpus IDs you actually retrieved with the
    corpus_query CLI — do not invent IDs.
 
-2. The corpus is the web3Sentinel knowledge base (Solodit findings, SWC
+2. The corpus is the Bricklane knowledge base (Solodit findings, SWC
    entries, and others). Query it via Bash:
 
        python -m scripts.corpus_query search "<query>" [--vuln-class CLASS] [--severity High|Medium|...] [--top-k N]

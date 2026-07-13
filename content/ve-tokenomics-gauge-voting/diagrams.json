@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How veTokenomics & Gauge Voting Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph L1[\"Layer 1: Voting Escrow\"]\n        A[User locks gov token] --> B[\"ve power = slope * time\"]\n        B --> C[Power decays to unlock]\n    end\n    subgraph L2[\"Layer 2: Gauge Router\"]\n        D[Vote weights onto gauges] --> E[Split epoch emissions]\n        E --> F[Stream tokens to LPs]\n    end\n    subgraph L3[\"Layer 3: Bribe Market\"]\n        G[Third party deposits bounty] --> H[Pay ve voters per gauge]\n    end\n    C --> D\n    F --> H"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Rent[\"Rentable Voting Power\"]\n        A[Flash-loan gov tokens] --> B[Mint or lock ve power]\n        B --> C[Delegate to slave contract]\n        C --> D[Cast deciding vote]\n        D --> E[Undelegate and withdraw]\n    end\n    subgraph Route[\"Routing Errors\"]\n        F[Vote for gaugeless pool] --> G[Emissions silently lost]\n        H[Deactivated gauge kept] --> I[Phantom emissions drawn]\n    end\n    subgraph Acct[\"Accounting Failure\"]\n        J[\"claimable not zeroed\"] --> K[Double-counted emissions]\n        K --> L[Voter contract insolvent]\n        M[Unbounded gauge loop] --> N[Distribution exceeds gas]\n    end\n    E --> O[Protocol control captured]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Vote or distribute call] --> B{\"Power durable, not rentable?\"}\n    B -- No --> R1[Reject flash-acquired power]\n    B -- Yes --> C{\"Snapshot at past block?\"}\n    C -- No --> R2[Require multi-day lock]\n    C -- Yes --> D{\"Same-block delegate+withdraw?\"}\n    D -- Yes --> R3[Block delegation bypass]\n    D -- No --> E{\"Gauge valid and live?\"}\n    E -- No --> R4[\"Reject vote, sync gauge set\"]\n    E -- Yes --> F{\"claimable settled once?\"}\n    F -- No --> R5[Zero accumulator per epoch]\n    F -- Yes --> G{\"Loop bounded / paginated?\"}\n    G -- No --> R6[Paginate distribution]\n    G -- Yes --> H[Emissions routed safely]"
+  }
+]

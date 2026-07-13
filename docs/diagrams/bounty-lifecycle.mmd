@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> New : Sweep Ingestion
+    New --> Stage1 : Triage grading (w3s score)
+    Stage1 --> Skipped : Score < 5 or manual skip
+    Stage1 --> Stage2_Audit : Score >= 5 & target cloned
+    Stage2_Audit --> Stage2_Done : Auditor passes completed
+    Stage2_Done --> Submitted : Exported & pasted to portal
+    Submitted --> Outcome_Logged : Verdict recorded
+    Outcome_Logged --> [*] : Feed feedback to calibrate Ranker
+    Skipped --> [*]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Cross-Chain Message Passing Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Source[\"Source Chain\"]\n        U[User deposits token] --> GW[\"Gateway locks or burns\"]\n        GW --> EV[Emit deposit event]\n    end\n    EV --> ATT{\"Attestation Layer\"}\n    subgraph Trust[\"Validators / Proof\"]\n        ATT --> SIG[\"Multisig, MPC or zk proof\"]\n    end\n    SIG --> H[\"Destination Handler\"]\n    subgraph Dest[\"Destination Chain\"]\n        H --> CHK{\"minted <= escrowed?\"}\n        CHK -->|Yes| MINT[Mint wrapped asset]\n        MINT --> R[Recipient receives]\n        CHK -->|No| REV[Revert message]\n    end"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Attacker] --> P1\n    A --> D1\n    A --> K1\n    subgraph Deposit[\"V1: Wrong-token deposit\"]\n        P1[\"Call legacy deposit, token=0x0\"] --> P2[safeTransferFrom is no-op]\n        P2 --> P3[Zero asset actually locked]\n    end\n    subgraph Drift[\"V2: Collateral drift\"]\n        D1[Deposit fee-on-transfer token] --> D2[Records full amount]\n        D2 --> D3[Receives less than recorded]\n    end\n    subgraph Admin[\"Admin abuse\"]\n        K1[Compromised admin key] --> K2[\"setPeer to fake ERC20\"]\n    end\n    P3 --> MINT[\"Handler mints unbacked supply\"]\n    D3 --> MINT\n    K2 --> MINT\n    MINT --> DEPEG[Wrapped asset depegs]\n    DEPEG --> DRAIN[Drain pooled collateral]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    IN[Incoming deposit] --> G1{\"token != address 0?\"}\n    G1 -->|No| REV1[Revert]\n    G1 -->|Yes| G2{\"Token in allowlist?\"}\n    G2 -->|No| REV2[Revert]\n    G2 -->|Yes| BAL[Snapshot balanceBefore]\n    BAL --> XFER[safeTransferFrom]\n    XFER --> DIFF[\"credited = after - before\"]\n    DIFF --> DEC{\"Decimals match dest?\"}\n    DEC -->|No| NORM[Normalize decimals]\n    DEC -->|Yes| BIND[Bind token and amount]\n    NORM --> BIND\n    BIND --> INV{\"minted <= escrowed?\"}\n    INV -->|No| REV3[Revert]\n    INV -->|Yes| OK[Emit attested message]\n    subgraph Hardening[\"Peer and admin hardening\"]\n        T1[Timelock on setPeer] --> T2[Multisig plus monitoring]\n    end"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Fee Distribution & Reward Streaming Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Funding\n        A[\"notifyRewardAmount lump sum\"] --> B[\"rewardRate = amount / DURATION\"]\n        B --> C[\"periodFinish = now + DURATION\"]\n    end\n    subgraph Accumulator\n        C --> D[\"on every interaction\"]\n        D --> E[\"accPerShare += rate * elapsed / totalSupply\"]\n    end\n    subgraph UserPosition\n        F[\"user stake changes\"] --> G[\"snapshot userCheckpoint\"]\n        E --> H[\"claimable = stake * (accPerShare - checkpoint)\"]\n        G --> H\n        H --> I[\"transfer rewards\"]\n        I --> J[\"update checkpoint to current\"]\n    end"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Sniping[\"Dividend Sniping (V2)\"]\n        A[\"Attacker watches mempool\"] --> B[\"sees distribute call pending\"]\n        B --> C[\"flash-loan or deposit just before\"]\n        C --> D[\"snapshot credits attacker balance\"]\n        D --> E[\"claim proportional share\"]\n        E --> F[\"withdraw in same block\"]\n    end\n    subgraph Manip[\"Accumulator Manipulation (V1)\"]\n        G[\"accPerShare from token.balanceOf\"] --> H[\"deposit/withdraw loop drains pool\"]\n        H --> I[\"accPerShare inflates\"]\n        I --> J[\"single claim mints excess\"]\n    end\n    subgraph Zero[\"Zero-Supply Drift (V4)\"]\n        K[\"totalSupply == 0\"] --> L[\"lastUpdateTime still advances\"]\n        L --> M[\"rewards stream unbacked\"]\n    end\n    F --> N[\"long-term stakers diluted\"]\n    J --> N\n    M --> N"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Reward claim request\"] --> B{\"eligibility by duration held?\"}\n    B -- \"no, balance snapshot\" --> X[\"vulnerable to sniping\"]\n    B -- \"yes, time-weighted\" --> C{\"accumulator from internal totalSupply?\"}\n    C -- \"no, uses balanceOf\" --> X\n    C -- \"yes\" --> D{\"totalSupply == 0?\"}\n    D -- \"yes\" --> E[\"freeze lastUpdateTime\"]\n    D -- \"no\" --> F[\"update reward before transfer\"]\n    E --> F\n    F --> G[\"round Floor in protocol favor\"]\n    G --> H[\"permission notifyRewardAmount caller\"]\n    H --> I[\"roll dust into next period\"]\n    I --> J[\"safe distribution\"]"
+  }
+]

@@ -1,9 +1,9 @@
 ---
 name: audit
-description: Run a smart-contract security audit on a Solidity target. Wraps static analyzers (Slither, Aderyn, Foundry) + the web3-auditor subagent grounded in the web3Sentinel corpus. Use when the user types `/audit <path-or-file>`.
+description: Run a smart-contract security audit on a Solidity target. Wraps static analyzers (Slither, Aderyn, Foundry) + the web3-auditor subagent grounded in the Bricklane corpus. Use when the user types `/audit <path-or-file>`.
 ---
 
-# /audit — web3Sentinel audit driver
+# /audit — Bricklane audit driver
 
 You are coordinating a full audit run. Inputs and outputs are deterministic;
 the LLM judgement happens inside the `web3-auditor` subagent invocation in

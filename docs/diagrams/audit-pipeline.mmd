@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant H as Harness (orchestrator)
+    participant S as Static Tools (Slither/Aderyn)
+    participant C as Corpus Database
+    participant LLM as Dual-Model Auditors (Claude + Codex)
+    participant V as Validators (Reconciler/Citations)
+
+    U->>H: Run Audit (target)
+    H->>H: 1. Resolve Target (Foundry/File/Sourcify)
+    H->>S: 2. Run Static Signatures & Compilers
+    S-->>H: Compilation output & static findings
+    H->>C: 3. Retrieve Context (vector search on code & symbols)
+    C-->>H: Top-K matching prior incidents
+    H->>LLM: 4. Parallel Audit Prompting (inject code + prior art)
+    LLM-->>H: Auditor Findings JSON lists
+    H->>V: 5. Reconcile Auditor Disagreements
+    V->>V: 6. Validate Citations (purge hallucinations)
+    V-->>H: Filtered & validated findings
+    H->>U: 7. Render Report (markdown + auto-scaffolded PoC)

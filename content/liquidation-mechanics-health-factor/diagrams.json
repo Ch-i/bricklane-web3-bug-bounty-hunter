@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Liquidation Mechanics & Health Factor Math Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Pricing[\"Oracle pricing\"]\n    A[Oracle prices collateral] --> B[Value collateral]\n    B --> C[Value debt]\n    end\n    C --> D{\"Health factor < 1?\"}\n    D -->|No| E[Position healthy]\n    E --> A\n    D -->|Yes| F[Liquidator repays debt]\n    F --> G[Seize collateral plus bonus]\n    G --> H{\"Seized covers debt?\"}\n    H -->|Yes| I[Pool stays solvent]\n    H -->|No| J[Shortfall socialized]\n    J --> K[\"Bad debt to lenders\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph V1[\"V1 Oracle re-pricing\"]\n    A1[Flash loan capital] --> A2[Pump thin DEX pair]\n    A2 --> A3[Oracle reads bad price]\n    A3 --> A4[Borrow on inflated value]\n    end\n    subgraph V2[\"V2 Atomic self-liquidation\"]\n    B1[Open position via proxy] --> B2[Borrow into bad debt]\n    B2 --> B3[Self-seize in one tx]\n    B3 --> B4[Pocket liquidation bonus]\n    end\n    subgraph V3[\"V3 Incentive failure\"]\n    C1[Bonus zero or dust] --> C2[No liquidator acts]\n    C2 --> C3[Position rots underwater]\n    end\n    A4 --> Z[\"Bad debt socialized\"]\n    B4 --> Z\n    C3 --> Z"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Liquidation request] --> B{\"Oracle robust?\"}\n    B -->|No| X[Revert]\n    B -->|Yes| C{\"Position touched this tx?\"}\n    C -->|Yes| X\n    C -->|No| D{\"ICR rechecked after debt?\"}\n    D -->|No| X\n    D -->|Yes| E{\"Bonus profitable?\"}\n    E -->|No| X\n    E -->|Yes| F[Allow seize]\n    subgraph Guards[\"Guards\"]\n    G[TWAP multi-source feeds]\n    H[CAPO sanity caps]\n    I[EVC same-tx seize ban]\n    J[Min position size]\n    end\n    G --> B\n    H --> B\n    I --> C\n    J --> E"
+  }
+]

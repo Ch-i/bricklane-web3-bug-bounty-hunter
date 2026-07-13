@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Integer Overflow & Precision Loss Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Fixed-width uint accounting\"] --> B{\"Operation type\"}\n    B -->|\"add / sub / mul\"| C[\"Overflow family\"]\n    B -->|\"division\"| D[\"Precision family\"]\n    subgraph Overflow[\"Overflow / Underflow\"]\n        C --> C1[\"Result leaves type bounds\"]\n        C1 --> C2{\"Solidity context\"}\n        C2 -->|\"pre-0.8 or unchecked\"| C3[\"Silent wrap-around\"]\n        C2 -->|\"narrowing cast\"| C3\n        C2 -->|\"0.8+ checked\"| C4[\"Revert\"]\n    end\n    subgraph Precision[\"Precision / Rounding\"]\n        D --> D1[\"Integer div truncates\"]\n        D1 --> D2[\"Remainder discarded\"]\n        D2 --> D3{\"Direction and order\"}\n    end\n    C3 --> E[\"Corrupted balance or supply\"]\n    D3 --> E"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker controls value size\"] --> B{\"Pick failure mode\"}\n    B -->|\"shrink numerator\"| C[\"Force quotient to zero\"]\n    B -->|\"engineer remainder\"| D[\"Trigger underflow\"]\n    B -->|\"self-transfer edge case\"| E[\"Double a balance\"]\n    subgraph ToZero[\"Truncation to zero\"]\n        C --> C1[\"1-wei share rounds to 0\"]\n        C1 --> C2[\"Keep backing, give worthless shares\"]\n    end\n    subgraph Underflow[\"Computed remainder\"]\n        D --> D1[\"slashed exceeds total\"]\n        D1 --> D2[\"Subtraction reverts as DoS\"]\n    end\n    subgraph SelfXfer[\"Accounting overflow\"]\n        E --> E1[\"Sub sender then add recipient\"]\n        E1 --> E2[\"Same address mints free funds\"]\n    end\n    C2 --> F[\"Value extracted\"]\n    E2 --> F\n    D2 --> G[\"Protocol wedged\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Arithmetic expression\"] --> B[\"Use Solidity 0.8+ checks\"]\n    B --> C{\"unchecked or narrowing cast?\"}\n    C -->|\"yes\"| D[\"Prove bounds manually\"]\n    C -->|\"no\"| E[\"Multiply before divide\"]\n    D --> E\n    E --> F[\"Round against the user\"]\n    F --> G{\"Can result hit zero?\"}\n    G -->|\"yes\"| H[\"Add min-amount guard\"]\n    G -->|\"no\"| I[\"Track and sweep dust\"]\n    subgraph Discipline[\"EIP-4626 discipline\"]\n        J[\"Mint-up / redeem-down\"]\n    end\n    H --> J\n    I --> J\n    J --> K[\"Manual magnitude review\"]"
+  }
+]

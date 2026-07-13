@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Checks-Effects-Interactions Pattern Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Function entry\"] --> B\n    subgraph checks[\"1. Checks\"]\n        B[\"Validate caller and inputs\"] --> C[\"Verify balance preconditions\"]\n    end\n    subgraph effects[\"2. Effects\"]\n        D[\"Update internal state\"] --> E[\"Deduct balance first\"]\n    end\n    subgraph interactions[\"3. Interactions\"]\n        F[\"External call last\"] --> G[\"Transfer tokens or ETH\"]\n    end\n    C --> D\n    E --> F\n    G --> H[\"Reentry sees fresh state\"]\n    H --> I[\"Preconditions now fail\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Reentrancy Variants Bypassing Naive Guards",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker calls withdraw\"] --> B[\"Checks pass\"]\n    B --> C[\"External call before update\"]\n    C --> D{\"Hook hands control back\"}\n    subgraph variants[\"Four exploit paths\"]\n        E[\"V1 read stale view oracle\"]\n        F[\"V2 re-enter sibling function\"]\n        G[\"V3 re-enter other contract\"]\n        H[\"V4 token NFT callback hook\"]\n    end\n    D --> E\n    D --> F\n    D --> G\n    D --> H\n    E --> I[\"Inflated virtual price used\"]\n    F --> J[\"Shared state, unshared lock\"]\n    G --> K[\"Independent guard storage\"]\n    H --> L[\"safeTransfer looks inert\"]\n    I --> M[\"Funds drained, $80M+ lost\"]\n    J --> M\n    K --> M\n    L --> M"
+  },
+  {
+    "id": "defense",
+    "title": "Layered Reentrancy Defense",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Function entry\"] --> B[\"Set nonReentrant lock\"]\n    subgraph cei[\"Enforce CEI ordering\"]\n        C[\"Checks\"] --> D[\"Effects update state\"]\n        D --> E[\"Interactions call last\"]\n    end\n    B --> C\n    E --> F[\"Release lock\"]\n    B -.shared.-> G[\"Same lock across contracts\"]\n    H[\"View functions\"] --> I[\"nonReadReentrant guard\"]\n    I --> J{\"Lock active?\"}\n    J -->|yes| K[\"Revert stale read\"]\n    J -->|no| L[\"Return fresh state\"]"
+  }
+]

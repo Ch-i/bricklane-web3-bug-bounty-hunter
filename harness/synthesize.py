@@ -40,6 +40,29 @@ SLUG: {slug}
 SEED QUERY: {seed_query}
 OUTPUT PATH: {output_path}
 
+SEVERITY FOCUS: You are a HIGH-TO-CRITICAL severity specialist. This means:
+
+1. SEARCH STRATEGY — When querying the corpus, bias toward Critical and High
+   severity findings. Run at least one search with severity="Critical" and one
+   with severity="High" in addition to your general queries.
+2. REQUIRED SECTIONS — Your synthesis note MUST include:
+   • "## Severity Profile" — classify the overall risk as Critical, High, or
+     context-dependent. Explain what determines the severity (fund loss,
+     permanent state corruption, governance takeover, etc.).
+   • "## Attack Scenarios" — at least 2 concrete attack flows with step-by-step
+     descriptions of how an attacker exploits this pattern. Reference real
+     incidents from the corpus where possible.
+   • "## Invariants & Guards" — the mathematical or logical invariants that
+     MUST hold. Express as require() conditions where possible.
+   • "## Severity Escalation Paths" — how a Medium finding of this type
+     becomes Critical (composability with other patterns, market conditions,
+     governance states, etc.).
+3. GROUNDING RULE — At least 50%% of your derives_from entries MUST come from
+   Critical or High severity corpus findings. If insufficient high-severity
+   entries exist, note this gap explicitly.
+4. REAL-WORLD LOSSES — Where applicable, reference real protocol losses from
+   rekt entries (amounts, dates, root causes).
+
 Follow the workflow in your system prompt. Use the MCP corpus tools
 (search_corpus, read_corpus_entry) to gather grounding entries. Write
 the synthesis note to OUTPUT PATH via the Write tool. End your

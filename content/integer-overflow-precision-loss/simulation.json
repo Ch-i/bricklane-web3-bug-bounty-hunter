@@ -1,0 +1,96 @@
+{
+  "title": "Precision Loss Token Drain",
+  "severity": "High",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "TokenVault"],
+  "incidents": [
+    {
+      "name": "Generic",
+      "date": null,
+      "chain": "Ethereum",
+      "loss_usd": "varies",
+      "note": "Common in DeFi vault implementations. See SWC-101."
+    }
+  ],
+  "initial_state": {
+    "vault_total_assets": "1,000,000 USDC (6 decimals)",
+    "vault_total_shares": "1,000,000 shares (18 decimals)",
+    "share_price": "1 share = 1 USDC",
+    "rounding_direction": "⚠️ Rounds DOWN on both deposit and withdraw",
+    "minimum_deposit": "⚠️ No minimum enforced",
+    "decimal_mismatch": "⚠️ USDC (6 dec) vs shares (18 dec)"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "TokenVault",
+      "action": "donate(1,000,000 USDC) [inflation attack setup]",
+      "description": "Attacker first deposits a tiny amount (1 wei of USDC) to receive 1 share, then donates 1,000,000 USDC directly to the vault (not through deposit). This inflates the share price so that 1 share = ~1,000,001 USDC. Now any deposit smaller than 1,000,001 USDC will mint 0 shares due to rounding down.",
+      "code": "// Step 1: Attacker becomes first depositor\nvault.deposit(1, attacker); // deposit 1 wei USDC, get 1 share\n\n// Step 2: Donate to inflate share price\nUSDC.transfer(address(vault), 1_000_000e6); // direct transfer\n\n// Now: totalAssets = 1,000,000.000001 USDC\n//      totalShares = 1\n//      pricePerShare = ~1,000,000 USDC\n\n// Any deposit < 1,000,000 USDC → 0 shares!\n// shares = depositAmount * totalShares / totalAssets\n// shares = 999,999e6 * 1 / 1,000,000e6 = 0 (rounded down!)",
+      "state_changes": {
+        "attacker_shares": "1 share",
+        "vault_total_assets": "⚠️ 1,000,000.000001 USDC (inflated by donation)",
+        "vault_total_shares": "1 share",
+        "share_price": "⚠️ ~$1,000,000 per share (massively inflated)"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "TokenVault",
+      "action": "waitForVictimDeposits()",
+      "description": "Victim users deposit USDC into the vault, expecting to receive proportional shares. A user depositing 500,000 USDC receives 0 shares because the rounding math truncates to zero. Their 500,000 USDC is added to the vault's total assets, further enriching the attacker's single share.",
+      "code": "// Victim deposits 500,000 USDC\nvault.deposit(500_000e6, victim);\n\n// Share calculation:\n// shares = 500,000e6 * 1 / 1,000,000e6\n// shares = 0.5 → rounds DOWN to 0\n// ⚠️ Victim receives 0 shares!\n// ⚠️ Victim's 500,000 USDC is stuck in vault\n\n// Vault state after:\n// totalAssets = 1,500,000 USDC\n// totalShares = 1 (still only attacker's share)\n// Attacker's 1 share now redeemable for $1,500,000",
+      "state_changes": {
+        "victim_shares": "⚠️ 0 shares (deposited $500,000)",
+        "victim_loss": "⚠️ $500,000 (irretrievable, no shares to redeem)",
+        "vault_total_assets": "1,500,000 USDC",
+        "attacker_share_value": "💰 $1,500,000 (was $1,000,000)"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Attacker",
+      "to": "TokenVault",
+      "action": "exploit_rounding_loop(1000 iterations)",
+      "description": "Alternatively, without waiting for victims, the attacker can exploit rounding in a loop. By depositing amounts just below the rounding threshold and immediately withdrawing, the attacker can extract tiny amounts of value each iteration due to asymmetric rounding between deposit and withdrawal.",
+      "code": "// Rounding exploitation loop\nfor (uint i = 0; i < 1000; i++) {\n    // Deposit: rounds DOWN (fewer shares, good for vault)\n    uint256 shares = vault.deposit(amount, attacker);\n    \n    // Withdraw: also rounds DOWN (fewer assets returned)\n    // But attacker manipulates to get favorable rounding\n    \n    // Key insight: deposit/withdraw at amounts where\n    // rounding error accumulates in attacker's favor\n    \n    // Each iteration extracts ~0.5 USDC of rounding dust\n    // 1000 iterations = ~500 USDC extracted\n    vault.withdraw(shares, attacker, attacker);\n}\n// Net extraction per iteration: ~1 wei of precision loss\n// Scales with iteration count and share price inflation",
+      "state_changes": {
+        "iterations": "1,000 deposit/withdraw cycles",
+        "dust_per_iteration": "~0.5 USDC",
+        "total_extracted": "💰 ~500 USDC (from rounding errors)",
+        "gas_cost": "⚠️ ~$200 (needs to be profitable)"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "TokenVault",
+      "action": "redeem(1 share) → withdraw all assets",
+      "description": "After accumulating victim deposits (or running the rounding loop), the attacker redeems their single share. Since they hold 100% of the shares, they receive the entire vault balance — their original deposit plus all the value stolen from victims through rounding.",
+      "code": "// Attacker redeems their 1 share for ALL vault assets\nuint256 assets = vault.redeem(\n    1,          // 1 share (100% of supply)\n    attacker,   // receiver\n    attacker    // owner\n);\n\n// assets = totalAssets * 1 / 1 = ALL USDC in vault\n// Attacker receives: 1,500,000 USDC\n// Attacker invested: 1,000,000 USDC (initial deposit + donation)\n// Profit from victim: 500,000 USDC\n\n// Vault is now empty\nassert(vault.totalAssets() == 0);\nassert(vault.totalSupply() == 0);",
+      "state_changes": {
+        "attacker_received": "💰 1,500,000 USDC",
+        "vault_total_assets": "⚠️ 0 USDC (fully drained)",
+        "vault_total_shares": "0 shares",
+        "attacker_profit": "💰 500,000 USDC stolen from victim"
+      }
+    },
+    {
+      "step": 5,
+      "from": "TokenVault",
+      "to": "TokenVault",
+      "action": "postmortem_and_mitigations()",
+      "description": "The attack exploited the ERC-4626 vault's rounding behavior combined with share price inflation. Mitigations include: implementing virtual shares/assets offset, enforcing minimum deposit amounts, rounding in favor of the vault on deposits and in favor of users on withdrawals, and using OpenZeppelin's ERC4626 with built-in inflation attack protection.",
+      "code": "// ✅ Mitigation: Virtual shares offset (OpenZeppelin style)\nfunction _decimalsOffset() internal pure returns (uint8) {\n    return 6; // Match USDC decimals\n}\n\nfunction totalAssets() public view returns (uint256) {\n    return USDC.balanceOf(address(this)) + 1; // +1 virtual asset\n}\n\nfunction totalSupply() public view returns (uint256) {\n    return _totalSupply + 10**_decimalsOffset(); // virtual shares\n}\n\n// With virtual offset:\n// Initial share price anchored, cannot be inflated\n// Donation attack becomes economically infeasible\n// Cost to manipulate: >> potential profit",
+      "state_changes": {
+        "root_cause": "⚠️ Share price inflation + rounding truncation",
+        "fix_1": "✓ Virtual shares/assets offset (ERC-4626 best practice)",
+        "fix_2": "✓ Minimum deposit amount enforcement",
+        "fix_3": "✓ Round UP on deposit (mint fewer shares), DOWN on withdraw",
+        "fix_4": "✓ Use OpenZeppelin ERC4626 with built-in protection"
+      }
+    }
+  ]
+}

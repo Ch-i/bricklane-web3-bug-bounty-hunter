@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Account Abstraction (ERC-4337) Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    U[\"User signs UserOperation\"] --> B[\"Bundler packs UserOps\"]\n    B --> EP[\"EntryPoint singleton\"]\n    subgraph Validation\n        EP --> VA[\"account.validateUserOp\"]\n        EP --> VP[\"paymaster.validatePaymasterUserOp\"]\n        VA --> SIG{\"ERC-1271 signature valid?\"}\n    end\n    SIG -->|mismatch| FAIL[\"Return SIG_VALIDATION_FAILED\"]\n    VP --> GAS[\"Paymaster sponsors gas\"]\n    subgraph Execution\n        EX[\"account executes callData\"] --> T[\"Target contract\"]\n    end\n    SIG -->|valid| EX\n    GAS --> EX"
+  },
+  {
+    "id": "attack",
+    "title": "Cross-EntryPoint Replay and 7702 Bypass",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker captures signed UserOp\"] --> H{\"userOpHash binds EntryPoint?\"}\n    H -->|\"No binding\"| R[\"Resubmit via 2nd EntryPoint\"]\n    R --> RE[\"Account re-executes transfer\"]\n    RE --> LOSS[\"Funds drained twice\"]\n    subgraph OtherFailures[\"Other failure modes\"]\n        E1[\"ECDSA-only ecrecover\"] --> X1[\"Smart accounts excluded\"]\n        E2[\"onlyEOA / tx.origin check\"] --> X2[\"7702 delegated EOA bypass\"]\n        E3[\"No nonce check in validateUserOp\"] --> X3[\"In-EntryPoint replay\"]\n    end\n    X2 --> LOSS\n    X3 --> LOSS"
+  },
+  {
+    "id": "defense",
+    "title": "Binding, Nonce and Signature Defenses",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    S[\"Build userOpHash\"] --> BIND[\"Bind chainId + EntryPoint addr\"]\n    BIND --> GATE{\"_requireFromEntryPoint\"}\n    GATE -->|\"ok\"| N[\"Enforce nonce via NonceManager\"]\n    N --> SC[\"Verify with SignatureChecker\"]\n    SC --> RET{\"Signature result?\"}\n    RET -->|\"valid\"| OK[\"Execute callData\"]\n    RET -->|\"mismatch\"| CODE[\"Return SIG_VALIDATION_FAILED\"]\n    RET -->|\"malformed\"| REV[\"Revert, do not mask\"]\n    subgraph Safe7702[\"EIP-7702 safe\"]\n        D1[\"Drop onlyEOA / tx.origin\"]\n        D2[\"Bound recipient callback gas\"]\n    end\n    OK --> Safe7702"
+  }
+]

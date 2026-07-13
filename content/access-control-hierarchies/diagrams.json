@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Access Control Hierarchies & Role Systems Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Roles[\"Role Hierarchy\"]\n        A[\"DEFAULT_ADMIN_ROLE\"] --> B[\"grantRole / revokeRole\"]\n        B --> C[\"OPERATOR_ROLE\"]\n        B --> D[\"PAUSER_ROLE\"]\n    end\n    E[\"Caller EOA\"] --> F[\"Privileged setter\"]\n    F --> G{\"Auth modifier present?\"}\n    G -->|\"onlyRole / onlyOwner\"| H[\"Check msg.sender principal\"]\n    G -->|\"none\"| J[\"Unguarded entry\"]\n    H -->|\"authorized\"| I[\"Mutate privileged state\"]\n    H -->|\"denied\"| K[\"Revert\"]\n    C --> H\n    D --> H"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    X[\"Attacker EOA\"] --> M{\"Failure mode\"}\n    M -->|\"V1 missing modifier\"| A1[\"Call unguarded setter\"]\n    M -->|\"V2 modifier dropped in refactor\"| A2[\"Call wide-open function\"]\n    M -->|\"V3 no per-account check\"| A3[\"Cancel any users order\"]\n    M -->|\"V4 tx.origin == owner\"| A4[\"Phish owner via contract\"]\n    M -->|\"Unprotected initialize()\"| A5[\"Win init race, seize owner\"]\n    M -->|\"Stolen owner key\"| A6[\"Sign as owner EOA\"]\n    A1 --> Z[\"Write privileged state\"]\n    A2 --> Z\n    A3 --> Z\n    A4 --> Z\n    A5 --> Z\n    A6 --> Z\n    Z --> R[\"Drain, brick or seize protocol\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Guard[\"Authorization gate\"]\n        A[\"Gate every state setter\"] --> B[\"Add onlyRole / onlyOwner\"]\n        B --> C[\"Use msg.sender, never tx.origin\"]\n    end\n    subgraph Role[\"Role design\"]\n        D[\"Override grantRole wrappers\"] --> E[\"Block inherited public grantRole\"]\n    end\n    subgraph Init[\"Upgrade safety\"]\n        F[\"Use initializer modifier\"] --> G[\"Guard _authorizeUpgrade\"]\n    end\n    subgraph Keys[\"Key hygiene\"]\n        H[\"Owner = multisig / timelock\"] --> I[\"Rotate keys, watch transfers\"]\n    end\n    C --> J[\"Diff modifiers each upgrade\"]\n    E --> J\n    G --> J\n    I --> J\n    J --> K[\"Privileged state protected\"]"
+  }
+]

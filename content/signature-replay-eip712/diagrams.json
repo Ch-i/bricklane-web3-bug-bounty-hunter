@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Signature Replay & EIP-712 Typed Data Works",
+    "type": "sequenceDiagram",
+    "mermaid": "sequenceDiagram\n    participant S as Off-chain Signer\n    participant D as EIP-712 Digest\n    participant C as Verifying Contract\n    Note over D: domain binds name version chainId contract\n    S->>D: hashStruct of message fields\n    D-->>S: digest 0x1901 sep hashStruct\n    S->>S: sign digest off-chain\n    S->>C: submit message plus signature\n    C->>C: recompute digest\n    C->>C: ecrecover authorized signer\n    C->>C: check nonce equals expected\n    C->>C: consume nonce then execute"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector: Replaying a Valid Signature",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Signer issues one signature] --> B{\"Digest binding complete?\"}\n    B -->|Yes| Z[Single one-time use]\n    B -->|No| ATK[Replay possible]\n    subgraph Missing bindings\n        V1[\"V1: no nonce in payload\"]\n        V2[\"V2: nonce signed not enforced\"]\n        V3[\"V3: chainId frozen or unchecked\"]\n        V4[\"V4: wrong or mutable domain\"]\n        V5[\"V5: encodePacked collision\"]\n    end\n    ATK --> V1\n    ATK --> V2\n    ATK --> V3\n    ATK --> V4\n    ATK --> V5\n    V1 --> R[\"Reuse sig forever, drain funds\"]\n    V2 --> R\n    V3 --> X[\"Replay on forked or other chain\"]\n    V4 --> Y[\"Cross-deployment replay\"]\n    V5 --> F[\"Forge params, same digest\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense: Bind Every Dimension of the Digest",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    Start[Incoming signed action] --> N{\"Nonce equals stored expected?\"}\n    N -->|No| Rej[\"Revert: stale or replayed\"]\n    N -->|Yes| CH{\"chainId equals block.chainid?\"}\n    CH -->|No| Rej\n    CH -->|Yes| DM{\"verifyingContract equals address this?\"}\n    DM -->|No| Rej\n    DM -->|Yes| RC[\"Recompute separator after fork\"]\n    RC --> HS[\"hashStruct commits every field\"]\n    HS --> CN[\"Consume nonce before action\"]\n    CN --> EX[\"Execute authorized action\"]\n    subgraph Four binding dimensions\n        U[\"Uniqueness: nonce\"]\n        C2[\"Chain: chainId\"]\n        D2[\"Domain: contract plus salt\"]\n        I[\"Integrity: full struct hash\"]\n    end"
+  }
+]

@@ -6,30 +6,51 @@ __pycache__/
 .python-version
 .pytest_cache/
 .ruff_cache/
+dist/
+build/
 
-# Project data
+# Project data (regenerated locally)
 corpus.db
 corpus.db-journal
 corpus.db-wal
 corpus.db-shm
 .embed-cache/
+
+# Audit outputs (generated per-run)
 audits/*
 !audits/.gitkeep
+
+# Autoresearch state (ephemeral)
+autoresearch-live.json
+autoresearch-log.jsonl
+autoresearch-state.json
 
 # Crawler state
 .crawler-state/
 *.cookies.json
+.cache/
 
 # Local secrets
 .env
 .env.local
 
-# Eval artifacts (kept in repo, but per-run traces gitignored)
+# Eval artifacts (per-run traces)
 eval/runs/
 
 # Jupyter
 .ipynb_checkpoints/
 
+# Node / UI
+ui/node_modules/
+ui/dist/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# MCP config (local)
+.mcp.json

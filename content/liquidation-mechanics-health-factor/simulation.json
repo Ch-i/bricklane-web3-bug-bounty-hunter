@@ -1,0 +1,107 @@
+{
+  "title": "Cascading Liquidation Attack",
+  "severity": "Critical",
+  "chain": "BSC",
+  "actors": ["Attacker", "LendingPool", "Oracle", "Liquidator", "Borrower"],
+  "incidents": [
+    {
+      "name": "Venus Protocol BSC",
+      "date": "2021-05-19",
+      "chain": "BSC",
+      "loss_usd": "$200M",
+      "contract": "0xfD36E2c2a6789Db23113685031d7F16329158384",
+      "tx_hash": "0x7d4e8ade00e51b8648a04fe41e5a9360cf56771fbc6e40a2b124e95d4455aa74",
+      "block": 7540000,
+      "explorer": "https://bscscan.com/tx/0x7d4e8ade00e51b8648a04fe41e5a9360cf56771fbc6e40a2b124e95d4455aa74"
+    }
+  ],
+  "initial_state": {
+    "ETH_price": "$2,000",
+    "borrower_collateral": "500 ETH ($1,000,000)",
+    "borrower_debt": "600,000 USDC",
+    "health_factor": "✓ 1.375 (healthy)",
+    "liquidation_threshold": "82.5%",
+    "liquidation_bonus": "5%",
+    "other_positions_at_risk": "~$20M in similar HF range"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "Oracle",
+      "action": "manipulatePrice(ETH, large_market_sell)",
+      "description": "Attacker executes a large market sell of ETH across multiple DEXs and CEXs, driving the price down from $2,000 to $1,400 (a 30% crash). This can be amplified using borrowed funds or coordinated with existing market volatility.",
+      "code": "// Attacker dumps ETH across markets\n// DEX: Large swap ETH → USDC on Uniswap V3\nISwapRouter(uniswap).exactInputSingle(\n    ISwapRouter.ExactInputSingleParams({\n        tokenIn: WETH,\n        tokenOut: USDC,\n        fee: 3000,\n        recipient: attacker,\n        amountIn: 10_000 ether, // Massive sell pressure\n        amountOutMinimum: 0,\n        sqrtPriceLimitX96: 0\n    })\n);",
+      "state_changes": {
+        "ETH_price": "⚠️ $2,000 → $1,400 (-30%)",
+        "market_impact": "⚠️ Cascading sell pressure across venues"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Oracle",
+      "to": "LendingPool",
+      "action": "priceUpdate(ETH, $1,400)",
+      "description": "The oracle updates to reflect the new ETH price of $1,400. The borrower's 500 ETH collateral is now worth only $700,000 against $600,000 of debt. The health factor drops from 1.375 to 0.96 — below the liquidation threshold of 1.0.",
+      "code": "// Health Factor recalculation\n// Collateral value = 500 ETH * $1,400 = $700,000\n// Adjusted collateral = $700,000 * 0.825 = $577,500\n// Health Factor = $577,500 / $600,000 = 0.9625\n\n// HF < 1.0 → Position is liquidatable!\nrequire(healthFactor < 1e18, \"Cannot liquidate healthy position\");",
+      "state_changes": {
+        "borrower_collateral_value": "⚠️ $700,000 (was $1,000,000)",
+        "health_factor": "⚠️ 0.96 (below 1.0 — liquidatable)",
+        "position_status": "⚠️ UNDERWATER"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Liquidator",
+      "to": "LendingPool",
+      "action": "liquidationCall(ETH, USDC, borrower, 300000e6)",
+      "description": "The attacker (now acting as liquidator) calls liquidationCall to repay 50% of the borrower's debt ($300,000 USDC) and seize the equivalent collateral plus a 5% liquidation bonus. They receive ~225 ETH ($315,000 worth at current prices) for a $15,000 profit.",
+      "code": "// Liquidator repays 50% of debt, seizes collateral + bonus\nlendingPool.liquidationCall(\n    ETH_ADDRESS,        // collateral asset\n    USDC_ADDRESS,       // debt asset\n    borrower,           // user to liquidate\n    300_000 * 1e6,      // repay 50% = 300,000 USDC\n    false               // receive underlying (not aToken)\n);\n// Receives: $300,000 / $1,400 * 1.05 = 225 ETH\n// Profit: 225 ETH * $1,400 - $300,000 = $15,000",
+      "state_changes": {
+        "borrower_debt": "300,000 USDC (halved)",
+        "borrower_collateral": "⚠️ 275 ETH (lost 225 ETH)",
+        "liquidator_profit": "💰 $15,000 (5% bonus on $300k)"
+      }
+    },
+    {
+      "step": 4,
+      "from": "LendingPool",
+      "to": "Borrower",
+      "action": "updatePosition(borrower)",
+      "description": "After the first liquidation, the borrower's remaining position is even more fragile: 275 ETH ($385,000) backing $300,000 debt. The massive collateral sale from liquidation adds further downward pressure on ETH price, pushing it to $1,200.",
+      "code": "// Post-liquidation position:\n// Remaining collateral: 275 ETH\n// Remaining debt: 300,000 USDC\n// But liquidation selling pressure drops ETH further...\n\n// ETH drops to $1,200 from liquidation cascade\n// New collateral value: 275 * $1,200 = $330,000\n// New HF = ($330,000 * 0.825) / $300,000 = 0.9075",
+      "state_changes": {
+        "ETH_price": "⚠️ $1,400 → $1,200 (liquidation selling pressure)",
+        "borrower_health_factor": "⚠️ 0.91 (still underwater, liquidatable again)",
+        "cascade_risk": "⚠️ HIGH — other positions entering danger zone"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Liquidator",
+      "to": "LendingPool",
+      "action": "liquidationCall(ETH, USDC, multiple_borrowers)",
+      "description": "The cascading price drop triggers liquidations across many positions. Borrowers who were previously healthy (HF ~1.1–1.2) are now underwater. Each liquidation sells more collateral, further depressing the price in a death spiral. Over $20M in positions are liquidated.",
+      "code": "// Cascade: Multiple positions liquidated in sequence\nfor (uint i = 0; i < underwaterPositions.length; i++) {\n    address borrower = underwaterPositions[i];\n    uint256 debtToCover = getMaxLiquidation(borrower);\n    \n    lendingPool.liquidationCall(\n        ETH_ADDRESS,\n        USDC_ADDRESS,\n        borrower,\n        debtToCover,\n        false\n    );\n    // Each liquidation dumps more ETH → price drops further\n}",
+      "state_changes": {
+        "total_liquidated": "⚠️ $20,000,000+ across multiple positions",
+        "ETH_price": "⚠️ $1,200 → $950 (death spiral)",
+        "cascade_positions": "⚠️ 47 positions liquidated"
+      }
+    },
+    {
+      "step": 6,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "buyBack(ETH) + closePositions()",
+      "description": "After the cascade completes and ETH price is at $950, the attacker buys back ETH at the depressed price and closes all positions. They profit from both the liquidation bonuses and the price round-trip. Borrowers lost their collateral, and the protocol may have accrued bad debt from positions that couldn't be fully liquidated.",
+      "code": "// Attacker buys back ETH at crashed price\nuniswap.exactInputSingle({\n    tokenIn: USDC,\n    tokenOut: WETH,\n    amountIn: attackerUSDC, // Buy cheap ETH\n    ...\n});\n\n// Profit sources:\n// 1. Liquidation bonuses: ~$1M (5% on $20M)\n// 2. Short position profit: ETH $2,000 → $950\n// 3. Protocol bad debt: positions too small to profitably liquidate",
+      "state_changes": {
+        "attacker_total_profit": "💰 ~$5,000,000+ (liquidation bonuses + short profit)",
+        "protocol_bad_debt": "⚠️ ~$2,000,000 (unliquidatable dust positions)",
+        "affected_borrowers": "⚠️ 47+ positions wiped out",
+        "ETH_price_recovery": "Slow recovery as selling pressure subsides"
+      }
+    }
+  ]
+}

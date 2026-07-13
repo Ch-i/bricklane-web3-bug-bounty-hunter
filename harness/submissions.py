@@ -86,7 +86,7 @@ def _format_filter_block(filter_info: dict | None) -> str:
     sym = {"ACCEPT": "✅", "DOWNGRADE": "↓", "REJECT": "✗", "ERROR": "!"}.get(verdict, "·")
     return (
         f"\n> **Internal review:** {sym} `{verdict}` — {rationale}\n"
-        f"> _(Verdict from web3Sentinel's filter agent — second-opinion pass.)_\n"
+        f"> _(Verdict from Bricklane's filter agent — second-opinion pass.)_\n"
     )
 
 
@@ -144,7 +144,7 @@ def render_c4(finding: Finding, candidate_id: str, run_dir: Path, *,
 
 ## Tools used
 
-* web3Sentinel multi-model audit harness (Claude + Codex + reconciler)
+* Bricklane Web3 Bug Bounty Hunter multi-model audit harness (Claude + Codex + reconciler)
 * Slither, Aderyn, Foundry
 * Grounded against corpus entries: {cites}
 
@@ -187,7 +187,7 @@ def render_sherlock(finding: Finding, candidate_id: str, run_dir: Path, *,
 {poc_block}
 ## Tool used
 
-web3Sentinel + Foundry
+Bricklane + Foundry
 
 ## Recommendation
 

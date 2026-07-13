@@ -1,0 +1,102 @@
+{
+  "title": "Stale Oracle Price Manipulation",
+  "severity": "Critical",
+  "chain": "Multi-chain",
+  "actors": ["Attacker", "PriceOracle", "ChainlinkAggregator", "LendingPool"],
+  "incidents": [
+    {
+      "name": "Mango Markets",
+      "date": "2022-10-11",
+      "chain": "Solana",
+      "loss_usd": "$114M",
+      "attacker": "Avraham Eisenberg",
+      "tx_signature": "4SmrMUHiSYh3AN5HGsqXMYmzNTHS4YggLNsSwPGbdn2kAmE4yqFjzUCkmppan8uZTp9qEhmHLrHEBWjb7REpBgwG",
+      "explorer": "https://solscan.io/tx/4SmrMUHiSYh3AN5HGsqXMYmzNTHS4YggLNsSwPGbdn2kAmE4yqFjzUCkmppan8uZTp9qEhmHLrHEBWjb7REpBgwG"
+    }
+  ],
+  "initial_state": {
+    "ETH_price": "$2,000 (real market price)",
+    "oracle_price": "$2,000 (last updated 6 hours ago)",
+    "heartbeat_threshold": "3600 seconds",
+    "attacker_balance": "100 ETH",
+    "pool_liquidity": "10,000,000 USDC",
+    "staleness_check": "❌ Not implemented"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "ChainlinkAggregator",
+      "to": "PriceOracle",
+      "action": "latestRoundData()",
+      "description": "The Chainlink aggregator has not updated the price feed for over 6 hours. The real ETH market price has crashed to $800, but the oracle still reports $2,000. The protocol lacks a staleness check on the updatedAt timestamp.",
+      "code": "// ⚠️ Vulnerable: No staleness check\nfunction getPrice(address token) external view returns (uint256) {\n    (, int256 price,, uint256 updatedAt,) = \n        priceFeed.latestRoundData();\n    // Missing: require(block.timestamp - updatedAt < HEARTBEAT)\n    return uint256(price);\n}",
+      "state_changes": {
+        "oracle_price": "⚠️ $2,000 (stale — real price is $800)",
+        "time_since_update": "⚠️ 21,600 seconds (6 hours, exceeds heartbeat)"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "LendingPool",
+      "action": "deposit(ETH, 100 ether)",
+      "description": "Attacker deposits 100 ETH as collateral. The lending pool values this at $200,000 using the stale oracle price ($2,000/ETH), when the real market value is only $80,000.",
+      "code": "// Attacker deposits ETH as collateral\nlendingPool.deposit{value: 100 ether}(\n    ETH_ADDRESS,\n    100 ether,\n    msg.sender,\n    0 // referral code\n);",
+      "state_changes": {
+        "attacker_collateral": "100 ETH (valued at $200,000 by stale oracle)",
+        "real_collateral_value": "⚠️ $80,000 (actual market value)",
+        "collateral_inflation": "⚠️ 2.5x overvalued"
+      }
+    },
+    {
+      "step": 3,
+      "from": "LendingPool",
+      "to": "PriceOracle",
+      "action": "getPrice(ETH)",
+      "description": "The lending pool queries the price oracle to calculate the maximum borrowing capacity. With 75% LTV and a stale price of $2,000, the attacker can borrow up to $150,000 — nearly double the real collateral value.",
+      "code": "// LendingPool calculates borrow capacity\nuint256 collateralValue = oracle.getPrice(ETH) * collateralAmount;\n// collateralValue = $2,000 * 100 = $200,000\nuint256 maxBorrow = collateralValue * LTV / 1e18;\n// maxBorrow = $200,000 * 75% = $150,000",
+      "state_changes": {
+        "max_borrow_capacity": "⚠️ $150,000 (should be $60,000)",
+        "health_factor": "✓ 1.33 (appears healthy with stale price)"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "LendingPool",
+      "action": "borrow(USDC, 150000e6)",
+      "description": "Attacker borrows the maximum $150,000 USDC against the inflated collateral valuation. This passes all health checks because the oracle still reports the stale price.",
+      "code": "// Attacker borrows max USDC\nlendingPool.borrow(\n    USDC_ADDRESS,\n    150_000 * 1e6,  // 150,000 USDC\n    2,               // variable rate\n    0,               // referral\n    msg.sender       // onBehalfOf\n);",
+      "state_changes": {
+        "attacker_debt": "150,000 USDC",
+        "attacker_usdc_balance": "💰 150,000 USDC received",
+        "pool_liquidity": "9,850,000 USDC"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "withdraw_to_external_wallet()",
+      "description": "Attacker immediately transfers the borrowed USDC to an external wallet. They have no intention of repaying the loan since the collateral is worth far less than the borrowed amount at real market prices.",
+      "code": "// Attacker moves funds out immediately\nUSDC.transfer(externalWallet, 150_000 * 1e6);\n// Net profit: $150,000 - $80,000 = $70,000\n// (borrowed $150k, collateral only worth $80k)",
+      "state_changes": {
+        "attacker_profit": "💰 $70,000 (borrowed $150k, collateral worth $80k)",
+        "funds_recoverable": "⚠️ No — funds already withdrawn"
+      }
+    },
+    {
+      "step": 6,
+      "from": "ChainlinkAggregator",
+      "to": "LendingPool",
+      "action": "priceUpdate(ETH, $800)",
+      "description": "When the oracle finally updates to the real price of $800, the position is deeply underwater. The 100 ETH collateral is now worth $80,000 against $150,000 of debt. Even full liquidation cannot recover the borrowed funds, leaving the protocol with $70,000 of bad debt.",
+      "code": "// After oracle updates:\n// Collateral: 100 ETH * $800 = $80,000\n// Debt: $150,000 USDC\n// Health Factor = ($80,000 * 0.825) / $150,000 = 0.44\n// ⚠️ Underwater — liquidation cannot recover full debt\n// Bad debt = $150,000 - $80,000 = $70,000",
+      "state_changes": {
+        "health_factor": "⚠️ 0.44 (deeply underwater)",
+        "protocol_bad_debt": "⚠️ $70,000 unrecoverable",
+        "pool_solvency": "⚠️ Impaired — socialized losses to depositors"
+      }
+    }
+  ]
+}

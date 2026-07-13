@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Timelock & Governance Execution Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Token holder] --> B[Submit proposal]\n    B --> C{Proposal-creation delay}\n    C --> D[Voting period opens]\n    D --> E[Cast vote / castVoteBySig]\n    E --> F{Quorum vs snapshot supply}\n    F -->|Passed| G[Queue in timelock]\n    F -->|Failed| H[Defeated]\n    subgraph TL[Timelock machinery]\n        G --> I{Delay elapsed?}\n        I -->|No| J[Wait]\n        J --> I\n        I -->|Yes| K[execute via msg.sender == timelock]\n    end\n    K --> L[Apply param / upgrade / treasury move]"
+  },
+  {
+    "id": "attack",
+    "title": "Flash-Loan Governance Takeover",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Attacker] --> B[Pre-stage malicious proposal]\n    B --> C{Creation delay matures}\n    C --> D[Open single transaction]\n    subgraph ATK[One block, one tx]\n        D --> E[Flash loan governance tokens]\n        E --> F[Deposit to inflate voting power]\n        F --> G{Voting power read live?}\n        G -->|Yes| H[vote on malicious bip]\n        H --> I{Execution delay enforced?}\n        I -->|No timelock| J[emergencyCommit same tx]\n        J --> K[Drain treasury / seize control]\n        K --> L[Withdraw and repay flash loan]\n    end\n    G -->|Delegate to slave| H\n    L --> M[Beanstalk $181M, Fortress, Atlantis]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Proposal submitted] --> B[Snapshot getPastVotes at past block]\n    B --> C[Quorum vs getPastTotalSupply]\n    C --> D{Voting power held over time?}\n    D -->|Flash-acquired| E[Reject: no live balance read]\n    D -->|Genuine| F[Lock delegated AND direct weight]\n    F --> G[Queue with mandatory timelock]\n    subgraph TL[Hardened timelock]\n        G --> H{Delay units = blocks/seconds correct}\n        H --> I[Enforce min delay before execute]\n        I --> J{msg.sender == timelock}\n        J -->|No| K[Revert]\n        J -->|Yes| L[nonReentrant single-use execute]\n    end\n    subgraph SIG[Signature hygiene]\n        M[nonce + deadline]\n        N[block.chainid in domain separator]\n        O[hash all semantic flags]\n    end\n    L --> P[Execute approved payload]\n    SIG --> P"
+  }
+]

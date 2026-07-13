@@ -1,0 +1,95 @@
+{
+  "title": "AMM Sandwich Attack",
+  "severity": "High",
+  "chain": "BSC",
+  "actors": ["Attacker", "AMM Pool", "Victim"],
+  "incidents": [
+    {
+      "name": "PancakeBunny",
+      "date": "2021-05-20",
+      "chain": "BSC",
+      "loss_usd": "$45M",
+      "attacker": "0xa0ACC61547f6bd066f7c9663C17A312b6571f5B6",
+      "tx_hash": "0x897c2de73dd55d7701e1b69ffb3a17b0f4801ced0b0c9b969571b4d44b1cff6f",
+      "block": 7549669,
+      "explorer": "https://bscscan.com/tx/0x897c2de73dd55d7701e1b69ffb3a17b0f4801ced0b0c9b969571b4d44b1cff6f"
+    }
+  ],
+  "initial_state": {
+    "pool_reserve_ETH": "10,000 ETH",
+    "pool_reserve_USDC": "20,000,000 USDC",
+    "ETH_spot_price": "$2,000",
+    "constant_product_k": "200,000,000,000",
+    "victim_pending_tx": "Swap 100 ETH → USDC (5% slippage tolerance)",
+    "mempool_visibility": "✓ Public mempool"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Victim",
+      "to": "AMM Pool",
+      "action": "swap(100 ETH → USDC) [PENDING in mempool]",
+      "description": "Victim submits a swap of 100 ETH for USDC with a 5% slippage tolerance (minAmountOut set to ~$190,000). This transaction is visible in the public mempool. The attacker's MEV bot detects the large pending swap and calculates the optimal sandwich parameters.",
+      "code": "// Victim's pending transaction in mempool\nuniswapRouter.swapExactTokensForTokens(\n    100 ether,           // amountIn: 100 ETH\n    190_000 * 1e6,       // amountOutMin: $190,000 (5% slippage)\n    [WETH, USDC],        // path\n    victim,              // recipient\n    block.timestamp + 300 // deadline\n);\n// ⚠️ 5% slippage tolerance = room for sandwich",
+      "state_changes": {
+        "victim_tx_status": "⚠️ Pending in mempool (visible to MEV bots)",
+        "slippage_tolerance": "⚠️ 5% ($10,000 extractable window)"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "AMM Pool",
+      "action": "frontrun_swap(500 ETH → USDC, higher gas)",
+      "description": "Attacker front-runs the victim by submitting a large buy with higher gas priority. They swap 500 ETH for USDC, moving the price significantly. The pool reserves shift from 10,000/20M to 10,500/~19,048,000. The effective ETH price rises from $2,000 to ~$2,177 due to the constant product formula.",
+      "code": "// Attacker's front-run transaction (higher gas priority)\n// k = 10,000 * 20,000,000 = 200,000,000,000\n// After attacker buys: new_USDC = k / (10,000 + 500)\n// new_USDC = 200B / 10,500 = 19,047,619 USDC\n// Attacker receives: 20,000,000 - 19,047,619 = 952,381 USDC\n\nuniswapRouter.swapExactTokensForTokens(\n    500 ether,           // large front-run buy\n    0,                   // no slippage protection needed\n    [WETH, USDC],\n    attacker,\n    block.timestamp\n); // Gas price: victim's gas + 1 gwei (priority)",
+      "state_changes": {
+        "pool_ETH": "10,500 ETH (+500)",
+        "pool_USDC": "19,047,619 USDC (-952,381)",
+        "ETH_spot_price": "⚠️ $2,000 → $1,814 per ETH (worse for victim)",
+        "attacker_received": "952,381 USDC"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Victim",
+      "to": "AMM Pool",
+      "action": "swap(100 ETH → USDC) [EXECUTES at worse price]",
+      "description": "Victim's transaction executes at the now-inflated price. Instead of receiving ~$200,000 USDC at the original price, they receive only ~$190,476 due to the attacker's front-run. The victim loses ~$9,524 but the transaction still succeeds because the output exceeds their 5% slippage minimum of $190,000.",
+      "code": "// Victim's swap executes AFTER attacker's front-run\n// Pool state: 10,500 ETH / 19,047,619 USDC\n// k = 200,000,000,000\n// new_USDC = 200B / (10,500 + 100) = 18,867,925\n// Victim receives: 19,047,619 - 18,867,925 = 179,694 USDC\n\n// Expected without attack: ~$200,000 USDC\n// Actually received: ~$179,694 USDC\n// ⚠️ Loss: ~$20,306\n// But 179,694 >= 190,000 minOut? NO — tx may revert\n// (Attacker calibrates front-run to stay within slippage)",
+      "state_changes": {
+        "pool_ETH": "10,600 ETH (+100)",
+        "pool_USDC": "18,867,925 USDC",
+        "victim_received": "⚠️ ~$190,476 USDC (lost ~$9,524 vs fair price)",
+        "victim_effective_price": "⚠️ $1,905/ETH (vs $2,000 fair price)"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "AMM Pool",
+      "action": "backrun_swap(952381 USDC → ETH, lower gas)",
+      "description": "Immediately after the victim's swap, the attacker back-runs by swapping their USDC back to ETH. The pool is now skewed with extra ETH, so the attacker gets a favorable rate. They recover ~505 ETH for their 952,381 USDC, netting ~5 ETH profit (~$10,000).",
+      "code": "// Attacker's back-run: swap USDC back to ETH\n// Pool state: 10,600 ETH / 18,867,925 USDC\n// k ≈ 200,000,000,000\n// Attacker swaps 952,381 USDC back\n// new_ETH = 200B / (18,867,925 + 952,381) = 10,094\n// Attacker receives: 10,600 - 10,094 = 506 ETH\n\nuniswapRouter.swapExactTokensForTokens(\n    952_381 * 1e6,       // USDC from front-run\n    500 ether,           // min ETH out\n    [USDC, WETH],\n    attacker,\n    block.timestamp\n);",
+      "state_changes": {
+        "pool_ETH": "~10,094 ETH",
+        "pool_USDC": "~19,820,306 USDC",
+        "attacker_ETH_balance": "💰 506 ETH (started with 500 ETH)"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "calculateProfit()",
+      "description": "The sandwich attack is complete in a single block. The attacker spent 500 ETH and recovered ~506 ETH, netting ~6 ETH (~$12,000) in profit. The victim received $9,524 less than the fair market price. The attacker paid ~$200 in gas fees, making this highly profitable MEV extraction.",
+      "code": "// Profit calculation:\n// Spent: 500 ETH\n// Recovered: ~506 ETH\n// Gross profit: ~6 ETH ($12,000)\n// Gas costs: ~0.1 ETH ($200)\n// Net profit: ~5.9 ETH ($11,800)\n\n// Victim impact:\n// Fair price output: ~$200,000 USDC\n// Actual output: ~$190,476 USDC\n// Victim loss: ~$9,524 (4.76% worse execution)\n\n// All three transactions in same block:\n// tx[0]: Attacker front-run (high priority)\n// tx[1]: Victim swap\n// tx[2]: Attacker back-run (low priority, same block)",
+      "state_changes": {
+        "attacker_net_profit": "💰 ~$11,800 (6 ETH - gas)",
+        "victim_loss": "⚠️ ~$9,524 (worse execution price)",
+        "block_mev": "💰 Total MEV extracted: ~$12,000",
+        "pool_state": "✓ Returns near original equilibrium"
+      }
+    }
+  ]
+}

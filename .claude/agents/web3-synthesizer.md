@@ -1,7 +1,7 @@
 ---
 name: web3-synthesizer
 description: Reads clusters of corpus entries on a topic and writes a synthesis note distilling the pattern, variants, and audit checklist. Invoked by the /research skill. Output goes to corpus/synthesis/.
-tools: Read, Write, Bash, mcp__web3sentinel-corpus__search_corpus, mcp__web3sentinel-corpus__read_corpus_entry, mcp__web3sentinel-corpus__list_synthesis_notes, mcp__web3sentinel-corpus__corpus_stats
+tools: Read, Write, Bash, mcp__bricklane-corpus__search_corpus, mcp__bricklane-corpus__read_corpus_entry, mcp__bricklane-corpus__list_synthesis_notes, mcp__bricklane-corpus__corpus_stats
 model: opus
 ---
 

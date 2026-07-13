@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Rollup Sequencing & State Proofs Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph L2[\"L2 Rollup\"]\n        U[User submits L2 tx] --> SEQ[Sequencer orders and batches]\n        SEQ --> EXEC[Execute batch off-chain]\n        EXEC --> ROOT[Compute new state root]\n    end\n    subgraph L1[\"L1 Settlement Layer\"]\n        POST[Post batch data to inbox] --> PROOF[Submit validity or fraud proof]\n        PROOF --> VERIFY{Real proof verified?}\n        VERIFY -->|Yes| FINAL[Finalize state root]\n        VERIFY -->|No| REJECT[Reject root]\n        FINAL --> BRIDGE[Bridge honors withdrawals]\n    end\n    SEQ --> POST\n    ROOT --> PROOF\n    U -. censored .-> FORCE[Force-include via L1 inbox]\n    FORCE --> POST"
+  },
+  {
+    "id": "attack",
+    "title": "Bypassed Proofs and Sequencer Abuse",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Attacker or rogue operator] --> CHOICE{Pick weak assumption}\n    CHOICE --> V1[Trust-door in finalization]\n    V1 --> V1a[\"finalizeBlocksWithoutProof()\"]\n    V1a --> WRITE[Write false L2 state root]\n    CHOICE --> V2[Unbounded proof index]\n    V2 --> V2a[historicalSummaryIndex unchecked]\n    V2a --> FORGE[Forge withdrawal proof]\n    FORGE --> WRITE\n    CHOICE --> V3[Forced-batch weaponization]\n    V3 --> V3a[Force and self-sequence batch]\n    V3a --> ROM[Trigger proving ROM bug]\n    ROM --> WRITE\n    CHOICE --> V4[Censorship, no escape hatch]\n    V4 --> FREEZE[User funds frozen forever]\n    WRITE --> DRAIN[Finalize fake root]\n    DRAIN --> STEAL[Drain L1 bridge]"
+  },
+  {
+    "id": "defense",
+    "title": "Hardening Proofs and Sequencing",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    START[Rollup hardening checklist] --> D1\n    subgraph Proofs[\"Proof integrity\"]\n        D1{Finalize always verifies?} -->|No| F1[Remove proof-bypass paths]\n        D1 -->|Yes| D2{All proof indices bounded?}\n        D2 -->|No| F2[Range-check each subtree index]\n        D2 -->|Yes| OK1[Proof system sound]\n    end\n    subgraph Sequencer[\"Sequencer limits\"]\n        D3{L1 force-inclusion exists?} -->|No| F3[Add L1 escape hatch]\n        D3 -->|Yes| D4{Forced batch bounded?}\n        D4 -->|No| F4[Bound ROM, canonical RLP only]\n        D4 -->|Yes| OK2[Censorship resistant]\n    end\n    subgraph Downstream[\"L2-aware downstream\"]\n        D5{Oracle gates on uptime feed?} -->|No| F5[Add sequencer-uptime check]\n        D5 -->|Yes| D6{Aliased senders handled?}\n        D6 -->|No| F6[Un-alias forced-message sender]\n        D6 -->|Yes| OK3[Safe on rollup]\n    end\n    OK1 --> D3\n    OK2 --> D5"
+  }
+]

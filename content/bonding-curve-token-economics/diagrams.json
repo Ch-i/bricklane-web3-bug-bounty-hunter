@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Bonding Curve Token Economics Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Curve[\"Bonding Curve Phase\"]\n        B[\"Buyer deposits reserve\"] --> M[\"Contract mints tokens\"]\n        M --> UP[\"Supply up, price up\"]\n        S[\"Seller redeems tokens\"] --> BR[\"Contract burns tokens\"]\n        BR --> DN[\"Supply down, price down\"]\n        UP --> P[\"price = f(supply)\"]\n        DN --> P\n    end\n    P --> R[\"Reserve grows on-chain\"]\n    R --> G{\"Curve target reached?\"}\n    G -->|No| B\n    G -->|Yes| GRAD[\"graduateToken()\"]\n    GRAD --> POOL[\"Seed DEX AMM pool\"]\n    POOL --> OPEN[\"Open-market trading\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker\"] --> CH{\"Choose attack seam\"}\n    subgraph V1[\"V1: Supply manipulation (Eminence)\"]\n        FL[\"Flash-borrow reserve\"] --> MINT[\"Mint large supply slug\"]\n        MINT --> WALK[\"Burn to walk price\"]\n        WALK --> REDEEM[\"Redeem rest at dislocated price\"]\n    end\n    subgraph V2[\"V2: Graduation (Moonbound)\"]\n        PRE[\"Pre-create DEX pair\"] --> SEED[\"Seed 1e10 vs 1 wei\"]\n        SEED --> RATIO[\"amountMin = 0 forces bad ratio\"]\n        RATIO --> DRAIN[\"Swap to drain pool\"]\n    end\n    subgraph V3[\"V3: Graduation DoS\"]\n        FORCE[\"selfdestruct sends extra KAS\"] --> REVERT[\"addLiquidity reverts\"]\n        SELL1[\"Sell 1 wei at boundary\"] --> STALL[\"totalSold below threshold\"]\n    end\n    subgraph V4[\"V4: Sandwich\"]\n        FRONT[\"Buy ahead of victim\"] --> VPUSH[\"Victim pushes price up\"]\n        VPUSH --> BACK[\"Sell behind victim\"]\n    end\n    CH --> FL\n    CH --> PRE\n    CH --> FORCE\n    CH --> FRONT\n    REDEEM --> PROFIT[\"Profit extracted\"]\n    DRAIN --> PROFIT\n    BACK --> PROFIT\n    REVERT --> BLOCK[\"Launch permanently blocked\"]\n    STALL --> BLOCK"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    T[\"Curve buy / sell / graduate\"] --> AUTH{\"Edition / params verified?\"}\n    AUTH -->|No| REJ[\"Revert: unregistered curve\"]\n    AUTH -->|Yes| FLASH{\"Same-block mint and burn?\"}\n    FLASH -->|Yes| REJ2[\"Block: enforce 1-block freeze\"]\n    FLASH -->|No| GRADCHK\n    subgraph Graduation[\"Harden graduation\"]\n        GRADCHK[\"Set amountTokenMin / amountKASMin\"] --> NOPRE[\"Forbid early pair creation\"]\n        NOPRE --> TRACK[\"Track reserve via internal counter\"]\n        TRACK --> RANGE[\"Trigger on range, not strict equality\"]\n        RANGE --> MINSELL[\"Enforce minimum sell size\"]\n    end\n    MINSELL --> SLIP{\"Slippage and TWAP checks pass?\"}\n    SLIP -->|No| REJ3[\"Revert: price out of bounds\"]\n    SLIP -->|Yes| OK[\"Execute trade / seed pool\"]"
+  }
+]

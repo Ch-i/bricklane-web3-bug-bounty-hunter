@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How AMM Constant Product Invariant (x*y=k) Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Trader sends dx of token X\"] --> B[\"swap() called on pool\"]\n    B --> C[\"Optimistic transfer of dy out\"]\n    C --> D[\"Recompute balances x2, y2\"]\n    subgraph Invariant[\"Constant product check\"]\n        D --> E[\"Subtract LP trading fee phi\"]\n        E --> F{\"x2 * y2 >= k ?\"}\n    end\n    F -->|Yes| G[\"k grows, fees accrue to LPs\"]\n    F -->|No| H[\"Revert: invariant broken\"]\n    G --> I[\"Reserves updated, swap settled\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Fork[\"V1: Broken fork math (Uranium)\"]\n        A[\"Constant 1000 changed to 10000\"] --> B[\"Fee-adjusted k check weakened\"]\n        B --> C[\"Attacker swaps 1 wei in\"]\n        C --> D{\"x2 * y2 >= k ?\"}\n        D -->|\"Passes wrongly\"| E[\"Drains ~98% of reserves\"]\n        E --> F[\"Pool emptied, $57.2M lost\"]\n    end\n    subgraph Spot[\"V3: Spot reserve manipulation\"]\n        G[\"Flash loan moves reserves\"] --> H[\"y/x spot price skewed\"]\n        H --> I[\"Consumer reads pool reserves\"]\n        I --> J[\"Mispriced mint or loan extracted\"]\n    end"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Implement swap invariant\"] --> B[\"Diff line-by-line vs Uniswap v2\"]\n    B --> C{\"Fee constants match reference?\"}\n    C -->|No| D[\"Reject: fork math error\"]\n    C -->|Yes| E[\"Round k up in protocol favor\"]\n    subgraph Guard[\"Per-swap enforcement\"]\n        E --> F{\"k_after >= k_before ?\"}\n        F -->|No| G[\"Revert swap\"]\n        F -->|Yes| H[\"Reconcile balances, reentrancy guard\"]\n    end\n    H --> I[\"Validate generalized curve assumptions\"]\n    I --> J[\"Price from TWAP, not spot reserves\"]\n    J --> K[\"Pool stays solvent\"]"
+  }
+]

@@ -1,1 +1,1 @@
-"""web3sentinel-corpus MCP server."""
+"""bricklane-corpus MCP server."""

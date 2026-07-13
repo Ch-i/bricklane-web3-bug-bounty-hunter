@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Oracle Aggregation & Staleness Detection Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Consumer[\"Protocol Logic\"]\n        A[Collateral / liquidation logic] --> B[Request asset price]\n    end\n    subgraph Validate[\"Oracle Read & Validation\"]\n        B --> C[\"Call latestRoundData()\"]\n        C --> D{\"updatedAt fresh?\"}\n        D -->|No| R[Revert: stale data]\n        D -->|Yes| E{\"Within minAnswer / maxAnswer?\"}\n        E -->|No| R\n        E -->|Yes| F{\"L2 sequencer up?\"}\n        F -->|No| R\n        F -->|Yes| G[Return validated price]\n    end\n    G --> H[Value collateral & set borrow limits]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector: Stale & Manipulated Prices",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Stale[\"Staleness Failures\"]\n        S1[\"Destructure answer only\"] --> S2[Old price looks current]\n        S3[LUNA crashes below floor] --> S4[\"Feed pinned at minAnswer $0.10\"]\n        S5[L2 sequencer offline] --> S6[Frozen price reads as live]\n    end\n    subgraph Manip[\"Same-Tx Manipulation\"]\n        M1[Flash loan] --> M2[Skew DEX reserves]\n        M2 --> M3[\"Read spot price slot0 / get_dy\"]\n    end\n    S2 --> X[Protocol books wrong price]\n    S4 --> X\n    S6 --> X\n    M3 --> X\n    X --> Y[Borrow / mint / liquidate]\n    Y --> Z[Attacker drains the difference]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense: Layered Freshness & Bounds Checks",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Read latestRoundData] --> B{\"updatedAt + staleAfter >= now?\"}\n    B -->|No| F[Revert]\n    B -->|Yes| C{\"answeredInRound >= roundId?\"}\n    C -->|No| F\n    C -->|Yes| D[\"Apply per-feed maxStaleness\"]\n    D --> E{\"minAnswer < answer < maxAnswer?\"}\n    E -->|No| F\n    subgraph L2[\"L2 Sequencer Guards\"]\n        G{\"sequencer answer == 1?\"} -->|Down| F\n        G -->|Up| H{\"now - startedAt > grace period?\"}\n        H -->|No| F\n    end\n    E -->|Yes| G\n    H -->|Yes| I[Corroborate via TWAP / 2nd source]\n    I --> J[Use trusted price]"
+  }
+]

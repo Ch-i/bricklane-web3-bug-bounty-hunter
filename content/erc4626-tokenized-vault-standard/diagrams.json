@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How ERC-4626 Tokenized Vault Standard Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Deposit\n        A[User deposits assets] --> B[\"shares = assets * totalSupply / totalAssets\"]\n        B --> C[Vault mints shares to user]\n    end\n    subgraph Accounting\n        D[\"totalAssets = balanceOf(vault)\"]\n        E[totalSupply tracks all shares]\n    end\n    D --> B\n    C --> E\n    subgraph Withdraw\n        F[User redeems shares] --> G[\"assets = shares * totalAssets / totalSupply\"]\n        G --> H[Vault returns underlying]\n    end\n    E --> G"
+  },
+  {
+    "id": "attack",
+    "title": "First-Depositor Donation Inflation Attack",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Fresh vault: totalSupply = 0\"] --> B[Attacker deposits 1 wei]\n    B --> C[\"Mints 1 wei share = 100% supply\"]\n    C --> D[Donate large amount via transfer]\n    D --> E[\"totalAssets inflated, supply unchanged\"]\n    E --> F[Front-run honest victim deposit]\n    F --> G[\"shares = deposit / totalAssets floors to 0\"]\n    G --> H[Victim receives 0 shares]\n    H --> I[Attacker redeems 1 wei share]\n    I --> J[Steals donation plus victim deposit]"
+  },
+  {
+    "id": "defense",
+    "title": "Defenses Against Vault Inflation",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[New vault deployment] --> B{Choose mitigations}\n    B --> C[Virtual shares and decimal offset]\n    B --> D[Seed dead shares on deploy]\n    B --> E[Enforce minimum first deposit]\n    B --> F[Internal asset accounting]\n    C --> G[\"Virtual supply makes inflation costly\"]\n    D --> H[\"Lock initial shares to address 0\"]\n    E --> I[\"Revert when sharesMinted == 0\"]\n    F --> J[\"Ignore direct transfer donations\"]\n    G --> K[Rounding favors vault]\n    H --> K\n    I --> K\n    J --> K\n    K --> L[Attack becomes uneconomic]"
+  }
+]

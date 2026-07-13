@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Flash Loan Mechanics & Composability Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph TX[\"Single Atomic Transaction\"]\n        A[\"Attacker calls flashLoan()\"] --> B[\"Borrow huge temporary capital\"]\n        B --> C[\"Move cheap-to-move state\"]\n        C --> D[\"Protocol reads the lie\"]\n        D --> E[\"Downstream action settles\"]\n        E --> F[\"Repay loan plus fee\"]\n    end\n    C -.-> P1[\"DEX price / reserves\"]\n    C -.-> P2[\"Vote tally\"]\n    C -.-> P3[\"Share price\"]\n    C -.-> P4[\"Slippage floor\"]\n    F --> G[\"Keep manipulated profit\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    Start[\"Flash-loan large capital\"] --> Branch{\"Target surface?\"}\n    Branch -->|\"Spot oracle\"| O1[\"Push pool reserves\"]\n    O1 --> O2[\"Read slot0 / getAmountsOut\"]\n    O2 --> O3[\"Mint/borrow/liquidate at lie\"]\n    Branch -->|\"Governance\"| G1[\"Deposit gov token\"]\n    G1 --> G2[\"Vote with no snapshot\"]\n    G2 --> G3[\"Execute malicious proposal\"]\n    Branch -->|\"Sandwich\"| S1[\"Front-run victim swap\"]\n    S1 --> S2[\"amountOutMin=0 or circular min\"]\n    S2 --> S3[\"Back-run to reset pool\"]\n    O3 --> Profit[\"Repay loan, keep profit\"]\n    G3 --> Profit\n    S3 --> Profit"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    Q[\"Quantity decides real money?\"] --> Principle[\"Split read and write across blocks\"]\n    subgraph Oracle[\"Price defenses\"]\n        D1[\"Use Chainlink / off-chain quote\"]\n        D2[\"TWAP window >= 30 min\"]\n        D3[\"Native withdrawal queue\"]\n    end\n    subgraph Gov[\"Governance defenses\"]\n        D4[\"Snapshot voting power\"]\n        D5[\"Timelock execution delay\"]\n    end\n    subgraph Slip[\"Slippage defenses\"]\n        D6[\"minOut from independent source\"]\n        D7[\"Reject amountOutMin = 0\"]\n    end\n    Principle --> Oracle\n    Principle --> Gov\n    Principle --> Slip"
+  }
+]

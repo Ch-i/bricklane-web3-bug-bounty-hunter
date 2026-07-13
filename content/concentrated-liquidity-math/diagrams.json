@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Concentrated Liquidity (Uniswap V3) Math Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Pool State\n      A[\"slot0: sqrtPriceX96 Q64.96\"]\n      B[\"Tick map: liquidityNet int128\"]\n      C[\"feeGrowthGlobal accumulators\"]\n    end\n    D[\"LP picks tickLower..tickUpper\"] --> E[\"Snap to tickSpacing multiples\"]\n    E --> F[\"getAmountsForLiquidity\"]\n    A --> G{\"Where is current price?\"}\n    F --> G\n    G -->|Below range| H[\"100% token0\"]\n    G -->|Inside range| I[\"Mix token0 + token1\"]\n    G -->|Above range| J[\"100% token1\"]\n    K[\"Swap crosses tick\"] --> B\n    B --> L[\"addDelta to active L\"]\n    C --> M[\"inside = global - below - above\"]\n    M --> N[\"Accrue to tokensOwed0/1\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Boundary Tick JIT Reward Theft",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker watches pool price\"] --> B[\"Swap price onto boundary tick\"]\n    B --> C[\"Tick equals range upper bound\"]\n    subgraph Buggy Integrator\n      D[\"Iterator seeds from currentTick - 1\"]\n      E[\"Skips boundary liquidityNet\"]\n      F[\"uint128 cast of negative net\"]\n    end\n    C --> D\n    D --> E\n    E --> G[\"Liquidity denominator too small\"]\n    F --> H[\"Active L inflated by two's complement\"]\n    G --> I[\"JIT add liquidity to t1-s..t1\"]\n    H --> I\n    I --> J[\"growth divided by L not L+L'\"]\n    J --> K[\"Steal all pool rewards\"]\n    H --> M[\"Withdraw more than deposited\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Safe CL Primitive Integration",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Integrator reads CL primitives\"] --> B{\"Tick rounding signed?\"}\n    B -->|No| C[\"Account for tick sign\"]\n    B -->|Yes| D{\"Crossing liquidityNet?\"}\n    C --> D\n    D --> E[\"Use LiquidityMath.addDelta\"]\n    E --> F{\"Boundary tick handling?\"}\n    F --> G[\"Decrement net, seed inclusively\"]\n    G --> H{\"Fee growth math?\"}\n    H --> I[\"Wrap subtractions in unchecked\"]\n    I --> J{\"Reading state?\"}\n    J --> K[\"Read per-position not pool key\"]\n    K --> L[\"Validate MIN_TICK / MAX_TICK\"]\n    L --> M[\"Avoid slot0 spot; use TWAP\"]\n    M --> N[\"Safe integration\"]"
+  }
+]

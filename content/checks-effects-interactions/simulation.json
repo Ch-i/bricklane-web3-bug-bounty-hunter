@@ -1,0 +1,106 @@
+{
+  "title": "Reentrancy Attack (DAO Hack Pattern)",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "VulnerableVault", "AttackerContract"],
+  "incidents": [
+    {
+      "name": "The DAO",
+      "date": "2016-06-17",
+      "chain": "Ethereum",
+      "loss_usd": "$60M",
+      "attacker": "0xF35e2cC8E6523d683eD44870f5B7cC785051a77D",
+      "contract": "0xBB9bc244D798123fDe783fCc1C72d3Bb8C189413",
+      "tx_hash": "0x0ec3f2488a93839524add10ea229e773f6bc891b4eb4794c3e9e2b5b57e5d60f",
+      "block": 1718497,
+      "etherscan": "https://etherscan.io/tx/0x0ec3f2488a93839524add10ea229e773f6bc891b4eb4794c3e9e2b5b57e5d60f"
+    },
+    {
+      "name": "Rari Capital (Fuse)",
+      "date": "2022-04-30",
+      "chain": "Ethereum",
+      "loss_usd": "$80M",
+      "attacker": "0x6162759eDAd730152F0dF8115c698a42E666157F",
+      "contract": "0x814b02C1ebc9164972D888495927fe1697F0Fb4c",
+      "tx_hash": "0xab486012f21be741c9e674ffda227e30518e8a1e37a5f1d58d0b0d41f6e76530",
+      "block": 14684813,
+      "etherscan": "https://etherscan.io/tx/0xab486012f21be741c9e674ffda227e30518e8a1e37a5f1d58d0b0d41f6e76530"
+    }
+  ],
+  "initial_state": {
+    "Vault Balance": "100 ETH",
+    "Attacker Deposit": "1 ETH",
+    "Attacker Wallet": "0 ETH",
+    "Vault.balances[attacker]": "1 ETH"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "VulnerableVault",
+      "action": "deposit{value: 1 ETH}()",
+      "description": "Attacker deposits 1 ETH through their malicious contract",
+      "code": "vault.deposit{value: 1 ether}();",
+      "state_changes": {
+        "Vault Balance": "101 ETH",
+        "Vault.balances[attacker]": "1 ETH"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "VulnerableVault",
+      "action": "withdraw(1 ETH)",
+      "description": "Call withdraw — vault checks balance ✓, sends ETH, THEN updates state",
+      "code": "// Vulnerable code:\nfunction withdraw(uint amt) {\n  require(balances[msg.sender] >= amt); // ✓\n  msg.sender.call{value: amt}(\"\"); // ← EXTERNAL CALL\n  balances[msg.sender] -= amt; // ← TOO LATE!\n}",
+      "state_changes": {}
+    },
+    {
+      "step": 3,
+      "from": "VulnerableVault",
+      "to": "AttackerContract",
+      "action": ".call{value: 1 ETH}(\"\")",
+      "description": "Vault sends 1 ETH → triggers attacker's receive() fallback",
+      "code": "// Attacker's receive() fires:\nreceive() external payable {\n  if (address(vault).balance >= 1 ether) {\n    vault.withdraw(1 ether); // RE-ENTER!\n  }\n}",
+      "state_changes": {
+        "Attacker Wallet": "1 ETH"
+      }
+    },
+    {
+      "step": 4,
+      "from": "AttackerContract",
+      "to": "VulnerableVault",
+      "action": "withdraw(1 ETH) ← RE-ENTRY!",
+      "description": "Re-enters withdraw() — balance NOT yet updated, so check passes again!",
+      "code": "// balances[attacker] still == 1 ETH!\n// Because line `balances -= amt`\n// hasn't executed yet",
+      "state_changes": {
+        "Vault.balances[attacker]": "1 ETH (stale!)"
+      }
+    },
+    {
+      "step": 5,
+      "from": "VulnerableVault",
+      "to": "AttackerContract",
+      "action": ".call{value: 1 ETH}(\"\")",
+      "description": "Vault sends ANOTHER 1 ETH — the loop continues until vault is drained",
+      "code": "// This loop repeats until:\n// address(vault).balance < 1 ether\n// Each iteration drains 1 ETH",
+      "state_changes": {
+        "Attacker Wallet": "2 ETH",
+        "Vault Balance": "99 ETH"
+      }
+    },
+    {
+      "step": 6,
+      "from": "AttackerContract",
+      "to": "VulnerableVault",
+      "action": "...repeats 98 more times...",
+      "description": "The recursive calls unwind — each finally executes balances -= amt",
+      "code": "// After 100 recursive calls:\n// Vault drained from 100 ETH → 0\n// Attacker profit: 100 ETH",
+      "state_changes": {
+        "Vault Balance": "0 ETH ⚠️",
+        "Attacker Wallet": "100 ETH 💰",
+        "Vault.balances[attacker]": "underflow!"
+      }
+    }
+  ]
+}

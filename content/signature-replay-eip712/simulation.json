@@ -1,0 +1,89 @@
+{
+  "title": "Cross-Chain Signature Replay Attack",
+  "severity": "Critical",
+  "chain": "Multi-chain",
+  "actors": ["Attacker", "Bridge", "ValidatorSet", "TargetChain"],
+  "incidents": [
+    {
+      "name": "Wormhole",
+      "date": "2022-02-02",
+      "chain": "Solana",
+      "loss_usd": "$320M",
+      "note": "Signature verification bypass on cross-chain VAA messages"
+    }
+  ],
+  "initial_state": {
+    "chain_a": "Ethereum Mainnet (chainId: 1)",
+    "chain_b": "Arbitrum (chainId: 42161)",
+    "bridge_tvl": "$100,000,000",
+    "domain_separator": "⚠️ Missing chainId field",
+    "valid_withdrawal": "100 ETH on Chain A",
+    "eip712_compliance": "❌ Incomplete domain separator"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "Bridge",
+      "action": "initiateWithdrawal(100 ETH) on Chain A",
+      "description": "Attacker initiates a legitimate withdrawal of 100 ETH on Chain A's bridge contract. The validators sign this withdrawal message using EIP-712 structured data. However, the bridge's domain separator omits the chainId field, making the signature valid on any chain with the same contract address.",
+      "code": "// ⚠️ Vulnerable domain separator — missing chainId!\nbytes32 DOMAIN_SEPARATOR = keccak256(abi.encode(\n    keccak256(\"EIP712Domain(string name,string version,address verifyingContract)\"),\n    keccak256(\"TokenBridge\"),\n    keccak256(\"1\"),\n    // Missing: block.chainid  ← CRITICAL OMISSION\n    address(this)\n));",
+      "state_changes": {
+        "withdrawal_chain_a": "✓ 100 ETH withdrawal initiated (legitimate)",
+        "signature_scope": "⚠️ Chain-agnostic (no chainId binding)"
+      }
+    },
+    {
+      "step": 2,
+      "from": "ValidatorSet",
+      "to": "Bridge",
+      "action": "signWithdrawal(messageHash, validators[])",
+      "description": "The validator set signs the withdrawal message hash. The signed message contains the recipient, amount, and nonce — but because chainId is missing from the domain separator, this signature is equally valid on Chain A and Chain B. The validators unknowingly create a replayable authorization.",
+      "code": "// Validators sign the withdrawal struct\nbytes32 structHash = keccak256(abi.encode(\n    WITHDRAW_TYPEHASH,\n    msg.sender,     // recipient\n    100 ether,      // amount\n    nonce           // replay protection (same chain only!)\n));\n\nbytes32 digest = keccak256(abi.encodePacked(\n    \"\\x19\\x01\",\n    DOMAIN_SEPARATOR,  // ⚠️ Same on both chains!\n    structHash\n));\n// Validators sign this digest\n// signature is valid wherever DOMAIN_SEPARATOR matches",
+      "state_changes": {
+        "signature_status": "✓ Valid multi-sig produced (3/5 validators)",
+        "signature_chain_binding": "⚠️ NONE — valid on any chain with same contract"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Attacker",
+      "to": "Bridge",
+      "action": "executeWithdrawal(signature) on Chain A",
+      "description": "Attacker executes the legitimate withdrawal on Chain A, receiving 100 ETH. This is a normal, valid transaction. The attacker carefully records the complete signed message and all validator signatures from the transaction calldata.",
+      "code": "// Legitimate withdrawal on Chain A\nbridge.executeWithdrawal(\n    recipient,  // attacker address\n    100 ether,  // amount\n    nonce,      // 42\n    signatures  // validator multi-sig\n);\n// ✓ Attacker receives 100 ETH on Chain A\n// Attacker saves: (recipient, amount, nonce, signatures)",
+      "state_changes": {
+        "chain_a_withdrawal": "✓ 100 ETH sent to attacker",
+        "chain_a_nonce_42": "✓ Marked as used",
+        "attacker_has_signatures": "⚠️ Signatures captured from calldata"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "TargetChain",
+      "action": "executeWithdrawal(same_signature) on Chain B",
+      "description": "Attacker replays the exact same transaction on Chain B (Arbitrum). Because the domain separator is identical (no chainId), the signatures are valid. The nonce 42 hasn't been used on Chain B yet. The bridge contract on Chain B verifies the signatures and releases another 100 ETH — a double spend.",
+      "code": "// ⚠️ REPLAY on Chain B (Arbitrum)\n// Same contract address, same domain separator\nbridge_chainB.executeWithdrawal(\n    recipient,  // same attacker address\n    100 ether,  // same amount\n    nonce,      // 42 — NOT USED on Chain B!\n    signatures  // same validator signatures — still valid!\n);\n\n// Verification passes because:\n// 1. DOMAIN_SEPARATOR is identical (no chainId)\n// 2. Nonce 42 is fresh on Chain B\n// 3. Validator signatures are cryptographically valid",
+      "state_changes": {
+        "chain_b_withdrawal": "⚠️ 100 ETH released (REPLAYED)",
+        "chain_b_nonce_42": "Marked as used (too late)",
+        "double_spend": "⚠️ 200 ETH total withdrawn from 100 ETH deposit"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Attacker",
+      "to": "Attacker",
+      "action": "repeat_across_all_chains()",
+      "description": "The attacker can repeat this on every chain where the bridge is deployed with the same contract address and domain separator. Each chain is a fresh target. The total theft is multiplied by the number of chains, potentially draining the bridge's liquidity across all deployments.",
+      "code": "// Attacker can replay on EVERY chain the bridge supports\n// Chain C (Optimism), Chain D (Polygon), Chain E (BSC)...\n\naddress[] chains = [arbitrum, optimism, polygon, bsc];\nfor (uint i = 0; i < chains.length; i++) {\n    bridge[chains[i]].executeWithdrawal(\n        recipient, 100 ether, nonce, signatures\n    );\n}\n\n// Fix: Include chainId in domain separator\n// bytes32 DOMAIN_SEPARATOR = keccak256(abi.encode(\n//     TYPEHASH, name, version,\n//     block.chainid,  // ← ADD THIS\n//     address(this)\n// ));",
+      "state_changes": {
+        "total_stolen": "💰 100 ETH × N chains (e.g., 500 ETH across 5 chains)",
+        "bridge_status": "⚠️ Drained across all deployments",
+        "root_cause": "⚠️ Missing chainId in EIP-712 domain separator",
+        "fix_required": "Include block.chainid in DOMAIN_SEPARATOR"
+      }
+    }
+  ]
+}

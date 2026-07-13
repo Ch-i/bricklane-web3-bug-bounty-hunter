@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Auction Mechanisms (Dutch, English, Sealed-Bid) Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Seller lists asset] --> B{Auction type}\n    B --> C\n    B --> F\n    B --> I\n    subgraph Dutch/GDA\n      C[Price decays over time]\n      C --> D[\"Compute current spot price\"]\n      D --> E[First bid at spot price wins]\n    end\n    subgraph English\n      F[Bids ascend, outbidding]\n      F --> G[Refund superseded bids]\n      G --> H[Highest bid at expiry wins]\n    end\n    subgraph Sealed-Bid\n      I[\"Commit hashed bid\"]\n      I --> J[Reveal phase]\n      J --> K[Highest valid reveal wins]\n    end\n    E --> L[\"Settle: transfer asset and funds\"]\n    H --> L\n    K --> L"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Adversary observes auction] --> B{Failure layer}\n    B --> C\n    B --> G\n    B --> K\n    subgraph Price-Curve Math\n      C[\"Divide before multiply\"]\n      C --> D[\"volume / price rounds down\"]\n      D --> E[\"Low-decimal token rounds to 0\"]\n      E --> F[Bidder pays, receives nothing]\n    end\n    subgraph Lifecycle\n      G[Unvalidated start/end times]\n      G --> H[Auction never ends or starts]\n      H --> I[Split finalize closes early]\n      I --> J[Reserves and NFT stranded]\n    end\n    subgraph Mempool Ordering\n      K[See pending bid or reveal]\n      K --> L[Front-run reveal or snipe block]\n      L --> M[Grief: bid then withdraw]\n      M --> N[Honest party loses value]\n    end"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Bid and settlement] --> B[Multiply before divide]\n    B --> C[Refund division remainder to bidder]\n    C --> D{Claim rounds to zero?}\n    D -->|Yes| E[Revert dust bid]\n    D -->|No| F[Proceed to lifecycle checks]\n    F --> G[\"Validate start < end timestamps\"]\n    G --> H[\"Enforce MIN_PRICE on decayed price\"]\n    H --> I[\"Atomic finalize: asset plus funds\"]\n    I --> J[Commit-reveal hides sealed bids]\n    J --> K[No-bid recovery path]\n    K --> L[Auction settles safely]"
+  }
+]

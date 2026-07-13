@@ -1,0 +1,111 @@
+{
+  "title": "Flash Loan Price Manipulation Attack",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "FlashLender", "DEX Pool", "Oracle", "LendingPool"],
+  "incidents": [
+    {
+      "name": "Euler Finance",
+      "date": "2023-03-13",
+      "chain": "Ethereum",
+      "loss_usd": "$197M",
+      "attacker": "0xeBC29199C817Dc47BA382D2C01c187a9e1B06843",
+      "contract": "0x27182842E098f60e3D576794A5bFFb0777E025d3",
+      "tx_hash": "0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d",
+      "block": 16818062,
+      "etherscan": "https://etherscan.io/tx/0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d"
+    },
+    {
+      "name": "Cream Finance v2",
+      "date": "2021-10-27",
+      "chain": "Ethereum",
+      "loss_usd": "$130M",
+      "attacker": "0x24354D31bC9D90F62FE5f2454709C32049cf866b",
+      "contract": "0x44fbebd2f576670a6c33f6fc0b00aa8c5753b322",
+      "tx_hash": "0x0fe2542079644e107cbf13690eb9c2c65963ccb79089ff96bfaf8dced2331c92",
+      "block": 13499247,
+      "etherscan": "https://etherscan.io/tx/0x0fe2542079644e107cbf13690eb9c2c65963ccb79089ff96bfaf8dced2331c92"
+    }
+  ],
+  "initial_state": {
+    "Attacker ETH": "0.1",
+    "Pool Price": "$2,000/ETH",
+    "Oracle Price": "$2,000/ETH",
+    "Pool Reserves": "1000 ETH / 2M USDC"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "tx_hash": "0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d",
+      "from": "Attacker",
+      "to": "FlashLender",
+      "action": "flashLoan(10000 ETH)",
+      "description": "Borrow 10,000 ETH with no collateral — must repay in same tx",
+      "code": "IFlashLender(aave).flashLoan(\n  address(this),\n  WETH,\n  10000e18,\n  \"\"\n);",
+      "state_changes": {
+        "Attacker ETH": "10,000.1"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "DEX Pool",
+      "action": "swap(5000 ETH → USDC)",
+      "description": "Dump 5,000 ETH into the pool to crash the spot price",
+      "code": "IUniswapV2Router(router).swapExact\n  TokensForTokens(\n  5000e18, 0,\n  [WETH, USDC], ...\n);",
+      "state_changes": {
+        "Pool Reserves": "6000 ETH / 333K USDC",
+        "Pool Price": "$55/ETH ⚠️"
+      }
+    },
+    {
+      "step": 3,
+      "from": "DEX Pool",
+      "to": "Oracle",
+      "action": "getReserves() → price update",
+      "description": "Oracle reads manipulated reserves as the 'current price'",
+      "code": "// Oracle uses spot price\nuint price = (reserveUSDC * 1e18)\n  / reserveETH;\n// Returns $55 instead of $2000!",
+      "state_changes": {
+        "Oracle Price": "$55/ETH ⚠️⚠️"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "LendingPool",
+      "action": "borrow(1.8M USDC, collateral: 5000 ETH)",
+      "description": "Deposit remaining ETH as collateral — oracle says it's worth very little, but lending pool uses different valuation",
+      "code": "ILendingPool(pool).deposit(\n  WETH, 5000e18\n);\nILendingPool(pool).borrow(\n  USDC, 1_800_000e6\n);",
+      "state_changes": {
+        "Attacker ETH": "5,000.1",
+        "Attacker USDC": "1,800,000"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Attacker",
+      "to": "DEX Pool",
+      "action": "swap(USDC → ETH) restore",
+      "description": "Buy back ETH to restore the pool price to normal",
+      "code": "IUniswapV2Router(router).swapExact\n  TokensForTokens(\n  333000e6, 0,\n  [USDC, WETH], ...\n);",
+      "state_changes": {
+        "Pool Price": "~$2,000/ETH ✓",
+        "Oracle Price": "~$2,000/ETH ✓",
+        "Attacker ETH": "~10,000"
+      }
+    },
+    {
+      "step": 6,
+      "from": "Attacker",
+      "to": "FlashLender",
+      "action": "repay(10000 ETH + fee)",
+      "description": "Repay flash loan — attacker keeps the borrowed USDC as profit",
+      "code": "IERC20(WETH).transfer(\n  address(flashLender),\n  10000e18 + fee\n);\n// Profit: ~1.5M USDC 💰",
+      "state_changes": {
+        "Attacker ETH": "0.1",
+        "Attacker USDC": "~1,467,000 💰",
+        "LendingPool": "Bad debt ⚠️"
+      }
+    }
+  ]
+}

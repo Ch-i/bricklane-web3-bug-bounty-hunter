@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Liquidity Bootstrapping & Fair Launch Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    subgraph Window[\"Bootstrap Window (genesis)\"]\n        A[New token genesis] --> B[Launchpad sells on bonding curve]\n        B --> C{\"Curve target reached?\"}\n        C -->|No| B\n        C -->|Yes| D[Graduate token]\n        D --> E[Create real DEX pair]\n        E --> F[Add initial liquidity]\n        F --> G[Mark finalized]\n        G --> H[Enable token transfers]\n    end\n    H --> I[Live DEX trading]"
+  },
+  {
+    "id": "attack",
+    "title": "Racing the Genesis Transaction",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Attacker watches mempool] --> B{Attack surface}\n    subgraph Window[\"Empty / thin bootstrap state\"]\n        B -->|V1 pre-empt pair| C[\"Pre-create pair skewed 1e10:1 wei\"]\n        B -->|V2 handoff| D[\"Sandwich graduation, mins 0,0\"]\n        B -->|V3 first-LP| E[\"Re-initialize pool price/rate\"]\n        B -->|V4 flash loan| F[\"Game launch fees in one block\"]\n    end\n    C --> G[\"Router uses attacker reserve ratio\"]\n    D --> G\n    E --> H[\"Honest LP overpays or bad APR\"]\n    F --> H\n    G --> I[Drain collected base asset]\n    H --> I\n    I --> J[\"Funds stolen or launch bricked\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Hardening the Genesis Transaction",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[Launch contract] --> B[\"Atomic initialize + mint multicall\"]\n    B --> C[\"Set graduated state BEFORE liquidity\"]\n    C --> D[Gate pair creation to graduated flag]\n    D --> E[\"Enforce slippage mins on graduation\"]\n    E --> F[Cap tokenForLiquidity to reserved supply]\n    F --> G[Never derive accounting from balance]\n    G --> H[Bound initial price/rate range]\n    H --> I[Require minimum initial liquidity]\n    I --> J[Depositor sets amounts, not spot read]\n    J --> K[Restrict initializer and lock LP]\n    K --> L[Manipulation-resistant fair launch]"
+  }
+]

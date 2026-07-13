@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Proxy & Upgrade Patterns Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    U[\"User / msg.sender\"] -->|call| P[\"Proxy (on-chain identity)\"]\n    subgraph PROXY[\"Proxy: owns storage + value\"]\n        SLOTS[\"State storage slots\"]\n        ADMIN[\"Admin slot (EIP-1967)\"]\n        IMPL[\"Implementation slot\"]\n    end\n    P -->|delegatecall| L[\"Implementation / logic code\"]\n    L -->|\"runs against proxy storage\"| SLOTS\n    L -->|\"address(this) = Proxy\"| P\n    GOV[\"Proxy admin / governance\"] -->|upgradeTo new logic| IMPL\n    IMPL -.->|points to| L\n    NOTE[\"Constructor never runs vs proxy\"] -.-> INIT[\"initialize() sets state once\"]\n    P --> INIT"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker\"] --> CHOOSE{\"Find broken assumption\"}\n    subgraph V1[\"Storage collision\"]\n        C1[\"Admin in slot 0/1\"] --> C2[\"Collides with _initialized\"]\n        C2 --> C3[\"Re-run initialize()\"]\n        C3 --> C4[\"Seize governance (Audius)\"]\n    end\n    subgraph V2[\"Unsafe upgrade\"]\n        U1[\"Base adds new variable\"] --> U2[\"No __gap / no ERC-7201\"]\n        U2 --> U3[\"Child slots shift down\"]\n        U3 --> U4[\"Silent state corruption\"]\n    end\n    subgraph V3[\"Live implementation\"]\n        I1[\"_disableInitializers missing\"] --> I2[\"Call initialize() on logic\"]\n        I2 --> I3[\"Attacker becomes owner\"]\n        I3 --> I4[\"delegatecall to SELFDESTRUCT\"]\n        I4 --> I5[\"Implementation bricked\"]\n    end\n    CHOOSE --> V1\n    CHOOSE --> V2\n    CHOOSE --> V3\n    C4 --> WIN[\"Funds or control stolen\"]\n    U4 --> WIN\n    I5 --> WIN"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    START[\"Harden upgradeable contract\"] --> G1\n    subgraph LAYOUT[\"1. Storage discipline\"]\n        G1[\"Use EIP-1967 keccak slots\"] --> G2[\"Append-only layout\"]\n        G2 --> G3[\"Add ERC-7201 namespaces or __gap\"]\n    end\n    subgraph INIT[\"2. Safe initialization\"]\n        H1[\"Atomic deploy + initialize\"] --> H2[\"initializer modifier (single-shot)\"]\n        H2 --> H3[\"Constructor calls _disableInitializers()\"]\n    end\n    subgraph CTX[\"3. Respect proxy context\"]\n        K1[\"No constructor/immutable state\"] --> K2[\"Avoid msg.value in loops\"]\n        K2 --> K3[\"Test logic behind a proxy\"]\n    end\n    G3 --> VERIFY{\"oz-upgrades validation passes?\"}\n    H3 --> VERIFY\n    K3 --> VERIFY\n    VERIFY -->|yes| SAFE[\"Safe upgrade\"]\n    VERIFY -->|no| START"
+  }
+]

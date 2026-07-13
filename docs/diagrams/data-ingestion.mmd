@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant Cron as Scheduler
+    participant Crawler as Source Crawler
+    participant Parser as Frontmatter Parser
+    participant DB as SQLite + FTS5
+
+    Cron->>Crawler: Run Ingestion
+    Crawler->>Crawler: Fetch new entries from source
+    Crawler->>Parser: Parse to Markdown + YAML frontmatter
+    Parser->>DB: Upsert with deduplication
+    DB->>DB: Update FTS5 index

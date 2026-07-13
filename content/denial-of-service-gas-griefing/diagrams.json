@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Denial of Service & Gas Griefing Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"User calls critical function\"] --> B{\"Cost or success<br/>attacker-influenced?\"}\n    B -->|No| C[\"Function executes normally\"]\n    B -->|Yes| D[\"Exposed to adversary\"]\n    subgraph COST[\"Cost-based exposure\"]\n        E[\"Loops over growing array\"]\n        F[\"O(n) processing per entry\"]\n        G[\"Copies callee return bytes\"]\n    end\n    subgraph LIVE[\"Liveness exposure\"]\n        H[\"Pushes ETH/tokens out\"]\n        I[\"Reverts whole flow on failure\"]\n        J[\"Strict balance/equality check\"]\n    end\n    D --> COST\n    D --> LIVE\n    COST --> K[\"Gas cost > block gas limit\"]\n    LIVE --> L[\"One bad party wedges all\"]\n    K --> M[\"Function permanently bricked\"]\n    L --> M\n    M --> N[\"Funds frozen, settlement blocked\"]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Attacker\"] --> B{\"Choose DoS vector\"}\n    subgraph V1[\"Unbounded loop\"]\n        C[\"Grow array indefinitely\"]\n        D[\"Iteration exceeds gas limit\"]\n    end\n    subgraph V2[\"Queue poisoning\"]\n        E[\"Spam zero-value/dust entries\"]\n        F[\"Inflate O(n) walk cheaply\"]\n    end\n    subgraph V3[\"Push-payment revert\"]\n        G[\"Revert in receive()/fallback\"]\n        H[\"Hold blacklisted token\"]\n    end\n    subgraph V4[\"Gas griefing\"]\n        I[\"Return huge payload bomb\"]\n        J[\"Force memory expansion OOG\"]\n    end\n    B --> V1\n    B --> V2\n    B --> V3\n    B --> V4\n    D --> Z[\"Call always reverts\"]\n    F --> Z\n    G --> Z\n    H --> Z\n    J --> Z\n    Z --> Y[\"Everyone else pays or fails\"]\n    Y --> X[\"Withdrawals/settlement frozen\"]"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    A[\"Design critical function\"] --> B{\"Iterates over a list?\"}\n    B -->|Yes| C[\"Cap length or paginate\"]\n    B -->|Yes| D[\"Enforce minimum entry size\"]\n    B -->|No| E{\"Sends value out?\"}\n    C --> E\n    D --> E\n    E -->|Yes| F[\"Pull-over-push: credit balances\"]\n    F --> G[\"Each party withdraws separately\"]\n    E -->|Yes| H[\"Isolate each transfer\"]\n    H --> I[\"Cap forwarded gas on call\"]\n    I --> J[\"Bound/ignore returned bytes\"]\n    E -->|No| K{\"Uses strict balance check?\"}\n    K -->|Yes| L[\"Track internal accounting var\"]\n    L --> M[\"Avoid exact balance equality\"]\n    G --> N[\"No single party can wedge flow\"]\n    J --> N\n    M --> N\n    N --> O[\"Liveness preserved for all\"]"
+  }
+]

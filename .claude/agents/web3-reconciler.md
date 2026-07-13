@@ -1,7 +1,7 @@
 ---
 name: web3-reconciler
 description: Merges parallel audit outputs from Claude and Codex auditors. Produces the final reconciled findings list and a ModelDisagreement section flagging where the two models diverged. Invoked by the /audit skill after both auditors have written their JSON outputs.
-tools: Read, Bash, mcp__web3sentinel-corpus__search_corpus, mcp__web3sentinel-corpus__read_corpus_entry
+tools: Read, Bash, mcp__bricklane-corpus__search_corpus, mcp__bricklane-corpus__read_corpus_entry
 model: opus
 ---
 

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "architecture",
+    "title": "How Yield Aggregator Composability Patterns Works",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    U[User deposits asset] --> V[Vault mints shares]\n    V --> P[\"pricePerShare = totalAssets / totalSupply\"]\n    V --> S[Route capital to strategies]\n    subgraph External Protocols\n        S --> A[AMM LP positions]\n        S --> L[Lending markets]\n        S --> G[Gauges / restaking]\n    end\n    A --> H[Harvest reward tokens]\n    L --> H\n    G --> H\n    H --> C[Swap rewards to principal]\n    C --> CO[Auto-compound into principal]\n    CO --> P\n    P --> W[User withdraws at share price]"
+  },
+  {
+    "id": "attack",
+    "title": "Attack Vector",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    AT[Attacker] --> FL[Flash-loan capital]\n    subgraph V1 Share Price Manipulation\n        FL --> D[Distort external pool state]\n        D --> DEP[Deposit at deflated price]\n        DEP --> RE[Re-inflate pool then redeem]\n        RE --> PR[Mint free shares]\n    end\n    AT --> HV[Front-run permissionless harvest]\n    subgraph V3 MEV Sandwich\n        HV --> SW[\"Unprotected swap amountOutMin = 0\"]\n        SW --> SAN[Sandwich every harvest]\n    end\n    AT --> FD[First-depositor donation]\n    FD --> INF[Inflate price, round down victim]\n    PR --> PROF[Drain honest depositors]\n    SAN --> PROF\n    INF --> PROF"
+  },
+  {
+    "id": "defense",
+    "title": "Defense Pattern",
+    "type": "flowchart",
+    "mermaid": "flowchart TD\n    ST[Strategy / Vault] --> Q{What state can move in-tx?}\n    Q --> O[Use TWAP resistant oracle]\n    O --> SP[Price shares off settled state]\n    ST --> SL[Off-chain amountOutMin bound]\n    SL --> CALM[Add calm-period deviation check]\n    ST --> WL[Whitelist immutable strategies]\n    WL --> GOV[Governance-gated, no arbitrary delegatecall]\n    ST --> SEED[Seed deposit or virtual shares]\n    SEED --> DON[Block donation inflation]\n    SP --> SAFE[Composable yield, no free shares]\n    CALM --> SAFE\n    GOV --> SAFE\n    DON --> SAFE"
+  }
+]

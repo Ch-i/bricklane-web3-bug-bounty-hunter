@@ -1,0 +1,37 @@
+graph TB
+    subgraph Data Ingestion
+        CR1[Solodit Crawler] --> |markdown| ING[Ingest Pipeline]
+        CR2[arXiv Crawler] --> |papers| ING
+        CR3[rekt.news Crawler] --> |post-mortems| ING
+        CR4[Sherlock Crawler] --> |contest findings| ING
+        CR5[Code4rena Crawler] --> |contest findings| ING
+        CR6[Cantina Crawler] --> |audit findings| ING
+        CR7[Immunefi Crawler] --> |bug bounties| ING
+        CR8[SWC Registry] --> |standard weaknesses| ING
+    end
+
+    subgraph Knowledge Base
+        ING --> CORPUS[(Corpus<br/>8,488 entries<br/>Markdown + YAML)]
+        CORPUS --> DB[(SQLite DB<br/>FTS5 + Embeddings)]
+        CORPUS --> SYN[Synthesis Engine]
+        SYN --> PAT[28 Logic Patterns]
+    end
+
+    subgraph Analysis Engine (Harness)
+        DB --> SCAN[Pattern Scanner]
+        DB --> AUDIT[Audit Runner<br/>Multi-model parallel]
+        AUDIT --> CIT[Citation Validator]
+        AUDIT --> DD[Deep Dive]
+        DD --> POC[PoC Generator]
+    end
+
+    subgraph Presentation Layer
+        API[FastAPI Backend] --> UI[React UI]
+        SCAN --> API
+        AUDIT --> API
+        PAT --> API
+        UI --> LIB[Pattern Library]
+        UI --> AG[Attack Graph]
+        UI --> SIM[Simulation Notebook]
+        UI --> DASH[Dashboard]
+    end
