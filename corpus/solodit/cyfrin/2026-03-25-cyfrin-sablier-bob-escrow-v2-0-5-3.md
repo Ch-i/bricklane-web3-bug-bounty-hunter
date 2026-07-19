@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2026-03-25-cyfrin-sablier-bob-escrow-v2-0-5-3
-ingested_at: '2026-05-15T13:52:11Z'
+ingested_at: '2026-07-19T07:07:17Z'
 protocol_category: []
 published_at: '2026-03-25T00:00:00Z'
 related_swc: []

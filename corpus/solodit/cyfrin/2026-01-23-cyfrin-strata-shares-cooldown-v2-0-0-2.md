@@ -1,0 +1,172 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2026-01-23-cyfrin-strata-shares-cooldown-v2-0-0-2
+ingested_at: '2026-07-19T07:07:17Z'
+protocol_category: []
+published_at: '2026-01-23T00:00:00Z'
+related_swc: []
+severity: Medium
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2026-01-23-cyfrin-strata-shares-cooldown-v2.0.md
+tags:
+- firm:cyfrin
+- report:2026-01-23-cyfrin-strata-shares-cooldown-v2-0
+title: JR Tranche is susceptible to bankrun scenarios given that `SharesCooldown`
+  finalization allows to bypass `minimumJrtSrtRatio` and first withdrawers from JR
+  Tranche get a better cooldown and fees compared to late withdrawers
+vuln_class: []
+---
+
+# JR Tranche is susceptible to bankrun scenarios given that `SharesCooldown` finalization allows to bypass `minimumJrtSrtRatio` and first withdrawers from JR Tranche get a better cooldown and fees compared to late withdrawers
+
+_Section severity (from Solodit section header): Medium_  
+_Audit firm: Cyfrin_  
+_Source report: [2026-01-23-cyfrin-strata-shares-cooldown-v2.0.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2026-01-23-cyfrin-strata-shares-cooldown-v2.0.md)_
+
+---
+
+**Description:** The protocol enforces a hard solvency constraint via minimumJrtSrtRatio, which is intended to guarantee that Junior Tranche (JRT) always retains a minimum buffer relative to Senior Tranche (SRT). This invariant is enforced during normal withdrawals through `Accounting.maxWithdrawInner()`. However, this protection is explicitly disabled when the share owner is the `SharesCooldown` contract (i.e call from `finalize` function):
+
+```solidity
+    function maxWithdrawInner(bool isJrt, bool ownerIsSharesCooldown) internal view returns (uint256) {
+        if (ownerIsSharesCooldown) {
+            return isJrt ? jrtNav : srtNav;
+        }
+        if (isJrt) {
+            uint256 minJrt = srtNav * minimumJrtSrtRatio / 1e18;
+            return Math.saturatingSub(jrtNav, minJrt);
+        }
+        // srt
+        return srtNav;
+    }
+```
+
+This creates a critical bypass. When JRT shares are moved into `SharesCooldown`, the subsequent redemption is executed with `owner = SharesCooldown`. At that point, the JRT hard-floor is no longer applied, and the protocol allows withdrawing up to the entire JRT NAV, even if doing so violates `minimumJrtSrtRatio`.
+
+The attached PoC demonstrates this behavior: after JRT shares are locked, additional `SRT` deposits increase `srtNav`, and once `SharesCooldown.finalize()` is called, the JRT withdrawal is executed without any hard-floor enforcement, leaving the system below` minimumJrtSrtRatio`.
+
+Leveraging the hard-floor bypass via the `SharesCooldown`, combined with the cooldown and fees charged on a withdrawal based on the current `coverage`, the system is susceptible to falling into bankrun scenarios where JR depositors rush to request a withdrawal for their deposits as a preventive measure in case the ratio continues to trend down to the hard-floor` limit. The first withdrawers will ensure they can withdraw their funds if the `hard-floor` limit is reached, and if the system starts to recover, they can cancel their withdrawal request and continue earning yield.
+- This behavior is unfair for late withdrawers because, as more JR withdrawals are processed, the `coverage` increments, which causes the late withdrawers to go under higher cooldown periods and pay higher fees than the earlier withdrawers.
+- The system would effectively incentivize earlier withdrawers to pull out their funds from the JR tranche while `coverage` is high, paying less fees and having a lower cooldown period.
+
+
+**Impact:** All `finalize` functions allow bypassing the `minimumJrtSrtRatio` constraint when redeeming shares from `SharesCooldown`. However, `finalizeWithFee()` is the most critical vector because it enables strategic exploitation: users can lock shares during healthy coverage periods, then pay a fee to exit early and bypass the hard floor without waiting the full cooldown period. This converts `minimumJrtSrtRatio` from a protective solvency constraint into a paid bypass mechanism.
+
+Once `jrtNav / srtNav` falls below `minimumJrtSrtRatio`:
+
+1. SRT deposits are disabled due to minimumJrtSrtRatioBuffer.
+
+2. Normal JRT withdrawals are blocked, effectively trapping remaining JRT liquidity.
+
+3. Late withdrawers on JRT are penalized in the form of paying higher fees and higher cooldown periods.
+
+**Proof of Concept:** Create a new file on `test/PoC/Cyfrin`
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { CDOTest } from "../../CDO.t.sol";
+import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
+import { IUnstakeHandler } from "../../../contracts/tranches/interfaces/cooldown/IUnstakeHandler.sol";
+import { ERC4626 } from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {console} from "forge-std/console.sol";
+import {SharesCooldown} from "../../../contracts/tranches/base/cooldown/SharesCooldown.sol";
+import {AccessControlled} from "../../../contracts/governance/AccessControlled.sol";
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { CooldownBase } from "../../../contracts/tranches/base/cooldown/CooldownBase.sol";
+
+contract JrtSrtRatioViolationTest is CDOTest {
+
+    function test_PoC() public {
+        address victim = address(0x1234);
+        address attacker = address(0x5678);
+        address owner = cdo.owner();
+        vm.startPrank(owner);
+        SharesCooldown sharesCooldown = SharesCooldown(
+            address(
+                new ERC1967Proxy(
+                    address(new SharesCooldown()),
+                    abi.encodeWithSelector(CooldownBase.initialize.selector, owner, address(acm))
+                )
+            )
+        );
+        AccessControlled(sharesCooldown).setTwoStepConfigManager(owner);
+        SharesCooldown.TExitUpperBounds memory exitBounds = ISharesCooldown.TExitUpperBounds({
+            p0: 100000,                    // 10% (in ppm)
+            p1: 150000,                   // 2.3% (in ppm)
+            r0: ISharesCooldown.TExitParams({ feePpm: 1000, sharesLock: 7 days }),   // Most restrictive: 0.1% fee, 7d lock
+            r1: ISharesCooldown.TExitParams({ feePpm: 500, sharesLock: 1 days }),    // Median: 0.05% fee, 1d lock
+            r2: ISharesCooldown.TExitParams({ feePpm: 0, sharesLock: 0 })            // Least: 0 fee, no lock
+        });
+        sharesCooldown.setVaultExitBounds(address(jrtVault), exitBounds);
+        acm.grantRole(keccak256("COOLDOWN_WORKER_ROLE"), address(cdo));
+        // 2. Register sharesCooldown in CDO
+        cdo.setSharesCooldown(ISharesCooldown(address(sharesCooldown)));
+
+        uint256 victimJRTDeposit = 100 ether;
+        uint256 attackerSRTDeposit = 1100 ether; // will push jrtNav:srtNav close to 0.05 minimumJrtSrtRatio
+
+        // Victim deposits to JRT
+        vm.startPrank(victim);
+        USDe.mint(victim, victimJRTDeposit);
+        USDe.approve(address(jrtVault), victimJRTDeposit);
+        jrtVault.deposit(victimJRTDeposit, victim);
+        vm.stopPrank();
+
+        // Attacker deposits to SRT
+        vm.startPrank(attacker);
+        USDe.mint(attacker, attackerSRTDeposit);
+        USDe.approve(address(srtVault), attackerSRTDeposit);
+        srtVault.deposit(attackerSRTDeposit, attacker);
+        vm.stopPrank();
+
+        // Sanity: Get initial jrtNav and srtNav
+        (uint256 jrtNavT0, uint256 srtNavT0, ) = accounting.totalAssetsT0();
+        // Confirm we’re at the hard floor (i.e. jrtNav/srtNav ≈ minimumJrtSrtRatio)
+        uint256 ratio = (jrtNavT0 * 1e18) / srtNavT0;
+        console.log("Ratio: ", ratio);
+
+        // victim withdraws 40 shares from JRT
+        vm.startPrank(victim);
+        uint256 victimWithdrawAmount = 40 ether;
+        jrtVault.withdraw(victimWithdrawAmount, victim, victim);
+        vm.stopPrank();
+
+        // Current ratio is still 100/1100 since TVL doesnt decrease
+
+        // Attacker deposits additional 900 ether to SRT vault
+        uint256 additionalSRTDeposit = 565 ether;
+        vm.startPrank(attacker);
+        USDe.mint(attacker, additionalSRTDeposit);
+        USDe.approve(address(srtVault), additionalSRTDeposit);
+        srtVault.deposit(additionalSRTDeposit, attacker);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 8 days);
+
+        vm.startPrank(victim);
+        sharesCooldown.finalize(jrtVault, address(USDe), victim);
+        vm.stopPrank();
+
+        (jrtNavT0, srtNavT0, ) = accounting.totalAssetsT0();
+        ratio = (jrtNavT0 * 1e18) / srtNavT0;
+        console.log("Ratio after JRT withdrawal finalized: ", ratio);
+        assertLt(ratio, 0.05e18, "Ratio is not below minimum required 5%");
+    }
+}
+```
+
+**Recommended Mitigation:** Modify finalizeWithFee() to enforce the minimumJrtSrtRatio constraint during early exits, preventing users from bypassing the hard floor by paying a fee.
+
+Also, consider changing the system mechanism to disincentivize withdrawals from the JRT as much as possible and instead, incentivize depositors to not withdraw their funds. This objective can be achieved by:
+- higher cooldown and fees when the `coverage` is high
+- lower cooldown and fees when the `coverage` is low
+The goal is to disincentivize first withdrawers (when `coverage` is high) from withdrawing by charging them a higher fee than later withdrawers, since late withdrawers face a higher risk of supporting the SR deposits.
+
+
+**Strata:** Fixed in commit [1feb125](https://github.com/Strata-Money/contracts-tranches/commit/1feb125bd8028d9d8ae2a0034f5cf831c82649e6).
+
+**Cyfrin:** Verified. Instant finalizations revert when the shares to be redeemed exceed the maximum redeemable shares on the underlying Tranche; The maximum redeemable shares account for the `minimumJrtSrtRatio` on the JRT.

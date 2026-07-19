@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2023-06-14-ondo-finance-3-5
-ingested_at: '2026-05-15T13:52:11Z'
+ingested_at: '2026-07-19T07:07:17Z'
 protocol_category: []
 published_at: '2023-06-14T00:00:00Z'
 related_swc: []

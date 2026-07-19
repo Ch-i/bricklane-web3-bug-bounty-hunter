@@ -1,0 +1,42 @@
+---
+affected_contracts: []
+derives_from: []
+id: solodit-cyfrin-2026-02-20-cyfrin-aarc-btcy-v2-0-1-8
+ingested_at: '2026-07-19T07:07:17Z'
+protocol_category: []
+published_at: '2026-02-20T00:00:00Z'
+related_swc: []
+severity: Low
+source: solodit
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2026-02-20-cyfrin-aarc-btcy-v2.0.md
+tags:
+- firm:cyfrin
+- report:2026-02-20-cyfrin-aarc-btcy-v2-0
+title: '`IBTCY::burn, forceTransfer` can burn `IBTCY` tokens held by the `BTCY` vault,
+  breaking the 1-to-1 collateral backing'
+vuln_class: []
+---
+
+# `IBTCY::burn, forceTransfer` can burn `IBTCY` tokens held by the `BTCY` vault, breaking the 1-to-1 collateral backing
+
+_Section severity (from Solodit section header): Low_  
+_Audit firm: Cyfrin_  
+_Source report: [2026-02-20-cyfrin-aarc-btcy-v2.0.md](https://github.com/solodit/solodit_content/blob/main/reports/Cyfrin/2026-02-20-cyfrin-aarc-btcy-v2.0.md)_
+
+---
+
+**Description:** `BTCY` is _"an ERC-4626 vault token that wraps iBTCY on a one-to-one basis. Only holders of iBTCY may mint or redeem BTCY, ensuring that BTCY remains fully collateralized"_.
+
+However `IBTCY::burn, forceTransfer` can burn `IBTCY` tokens held by the `BTCY` vault, breaking the 1-to-1 collateral backing.
+
+**Recommended Mitigation:** Revert in `IBTCY::burn, forceTransfer` if the target is the `IBTCY` vault. For example:
+```diff
+function burn(address from, uint256 amount) public override onlyRole(BURNER_ROLE) {
++   require(from != _getIBTCYStorage().btcyVault, CannotBurnFromVault());
+    _burn(from, amount);
+}
+```
+
+**Aarc:** Fixed in commit [9089464](https://github.com/aarc-xyz/btcy-contracts-main/pull/11/changes/9089464eedeebf1913ff9db62df2ef63f7bd5847).
+
+**Cyfrin:** Verified.

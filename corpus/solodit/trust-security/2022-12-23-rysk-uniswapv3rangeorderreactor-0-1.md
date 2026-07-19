@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-trust-security-2022-12-23-rysk-uniswapv3rangeorderreactor-0-1
-ingested_at: '2026-05-15T13:52:11Z'
+ingested_at: '2026-07-19T07:07:17Z'
 protocol_category: []
 published_at: '2022-12-23T00:00:00Z'
 related_swc: []

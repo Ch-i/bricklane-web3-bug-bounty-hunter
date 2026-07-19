@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2026-03-17-cyfrin-securitize-solana-spl-acl-v2-0-1-1
-ingested_at: '2026-05-15T13:52:11Z'
+ingested_at: '2026-07-19T07:07:17Z'
 protocol_category: []
 published_at: '2026-03-17T00:00:00Z'
 related_swc: []

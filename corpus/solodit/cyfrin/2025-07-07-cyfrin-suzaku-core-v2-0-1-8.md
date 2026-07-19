@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-07-07-cyfrin-suzaku-core-v2-0-1-8
-ingested_at: '2026-05-15T13:52:11Z'
+ingested_at: '2026-07-19T07:07:17Z'
 protocol_category: []
 published_at: '2025-07-07T00:00:00Z'
 related_swc: []
