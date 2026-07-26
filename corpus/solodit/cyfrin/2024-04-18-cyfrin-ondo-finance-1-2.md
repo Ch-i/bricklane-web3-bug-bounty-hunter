@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-04-18-cyfrin-ondo-finance-1-2
-ingested_at: '2026-07-19T07:07:17Z'
+ingested_at: '2026-07-26T07:14:09Z'
 protocol_category: []
 published_at: '2024-04-18T00:00:00Z'
 related_swc: []

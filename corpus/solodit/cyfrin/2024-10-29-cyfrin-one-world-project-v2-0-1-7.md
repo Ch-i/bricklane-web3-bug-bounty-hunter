@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-10-29-cyfrin-one-world-project-v2-0-1-7
-ingested_at: '2026-07-19T07:07:17Z'
+ingested_at: '2026-07-26T07:14:09Z'
 protocol_category: []
 published_at: '2024-10-29T00:00:00Z'
 related_swc: []

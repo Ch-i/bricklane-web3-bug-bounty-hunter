@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-12-18-cyfrin-the-standard-auto-redemption-v2-0-3-4
-ingested_at: '2026-07-19T07:07:17Z'
+ingested_at: '2026-07-26T07:14:09Z'
 protocol_category: []
 published_at: '2024-12-18T00:00:00Z'
 related_swc: []

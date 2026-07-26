@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-10-22-cyfrin-remora-dynamic-tokens-v2-1-3-0
-ingested_at: '2026-07-19T07:07:17Z'
+ingested_at: '2026-07-26T07:14:09Z'
 protocol_category: []
 published_at: '2025-10-22T00:00:00Z'
 related_swc: []

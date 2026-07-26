@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-recon-audits-2025-03-23-quill-finance-report-1-4
-ingested_at: '2026-07-19T07:07:17Z'
+ingested_at: '2026-07-26T07:14:09Z'
 protocol_category: []
 published_at: '2025-03-23T00:00:00Z'
 related_swc: []
