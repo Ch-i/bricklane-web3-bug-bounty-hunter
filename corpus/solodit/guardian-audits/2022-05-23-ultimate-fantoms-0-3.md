@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-guardian-audits-2022-05-23-ultimate-fantoms-0-3
-ingested_at: '2026-07-26T07:14:09Z'
+ingested_at: '2026-08-09T05:32:30Z'
 protocol_category: []
 published_at: '2022-05-23T00:00:00Z'
 related_swc: []
