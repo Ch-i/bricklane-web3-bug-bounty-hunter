@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2021-01-16-nord-finance-0-3
-ingested_at: '2026-08-09T05:32:30Z'
+ingested_at: '2026-08-16T05:02:10Z'
 protocol_category: []
 published_at: '2021-01-16T00:00:00Z'
 related_swc: []

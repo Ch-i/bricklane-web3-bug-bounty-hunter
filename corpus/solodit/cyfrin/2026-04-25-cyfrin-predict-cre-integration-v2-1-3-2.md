@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2026-04-25-cyfrin-predict-cre-integration-v2-1-3-2
-ingested_at: '2026-08-09T05:32:30Z'
+ingested_at: '2026-08-16T05:02:10Z'
 protocol_category: []
 published_at: '2026-04-25T00:00:00Z'
 related_swc: []

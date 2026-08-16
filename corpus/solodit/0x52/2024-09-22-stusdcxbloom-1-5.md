@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-0x52-2024-09-22-stusdcxbloom-1-5
-ingested_at: '2026-08-09T05:32:30Z'
+ingested_at: '2026-08-16T05:02:10Z'
 protocol_category: []
 published_at: '2024-09-22T00:00:00Z'
 related_swc: []
