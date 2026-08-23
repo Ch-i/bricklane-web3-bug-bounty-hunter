@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-12-11-cyfrin-benqi-ignite-v2-0-2-1
-ingested_at: '2026-08-16T05:02:10Z'
+ingested_at: '2026-08-23T05:04:32Z'
 protocol_category: []
 published_at: '2024-12-11T00:00:00Z'
 related_swc: []

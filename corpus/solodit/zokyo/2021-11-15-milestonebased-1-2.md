@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2021-11-15-milestonebased-1-2
-ingested_at: '2026-08-16T05:02:10Z'
+ingested_at: '2026-08-23T05:04:32Z'
 protocol_category: []
 published_at: '2021-11-15T00:00:00Z'
 related_swc: []
