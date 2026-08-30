@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-recon-audits-2025-03-22-apollon-report-2-6
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2025-03-22T00:00:00Z'
 related_swc: []

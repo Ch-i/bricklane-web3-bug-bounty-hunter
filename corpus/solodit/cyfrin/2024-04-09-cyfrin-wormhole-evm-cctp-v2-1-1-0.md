@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-04-09-cyfrin-wormhole-evm-cctp-v2-1-1-0
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2024-04-09T00:00:00Z'
 related_swc: []

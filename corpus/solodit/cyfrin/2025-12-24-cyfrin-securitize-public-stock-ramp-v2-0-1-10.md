@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-12-24-cyfrin-securitize-public-stock-ramp-v2-0-1-10
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2025-12-24T00:00:00Z'
 related_swc: []

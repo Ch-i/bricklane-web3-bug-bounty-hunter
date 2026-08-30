@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-08-28-cyfrin-avant-max-v2-0-2-4
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2025-08-28T00:00:00Z'
 related_swc: []

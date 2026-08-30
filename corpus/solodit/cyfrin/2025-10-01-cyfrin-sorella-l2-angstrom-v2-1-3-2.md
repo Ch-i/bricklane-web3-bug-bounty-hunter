@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-10-01-cyfrin-sorella-l2-angstrom-v2-1-3-2
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2025-10-01T00:00:00Z'
 related_swc: []

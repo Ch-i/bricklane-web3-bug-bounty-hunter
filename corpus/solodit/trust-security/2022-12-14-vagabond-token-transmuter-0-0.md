@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-trust-security-2022-12-14-vagabond-token-transmuter-0-0
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2022-12-14T00:00:00Z'
 related_swc: []

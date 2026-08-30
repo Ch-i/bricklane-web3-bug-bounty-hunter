@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2026-04-30-cyfrin-securitize-solana-bridge-v2-1-4-2
-ingested_at: '2026-08-23T05:04:32Z'
+ingested_at: '2026-08-30T10:05:51Z'
 protocol_category: []
 published_at: '2026-04-30T00:00:00Z'
 related_swc: []
