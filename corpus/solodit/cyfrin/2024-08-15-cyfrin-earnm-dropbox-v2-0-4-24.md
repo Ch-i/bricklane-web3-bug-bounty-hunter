@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-08-15-cyfrin-earnm-dropbox-v2-0-4-24
-ingested_at: '2026-09-06T08:49:48Z'
+ingested_at: '2026-09-20T09:26:52Z'
 protocol_category: []
 published_at: '2024-08-15T00:00:00Z'
 related_swc: []
