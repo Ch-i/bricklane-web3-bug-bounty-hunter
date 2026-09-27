@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2021-10-13-gamestattion-1-1
-ingested_at: '2026-09-20T09:26:52Z'
+ingested_at: '2026-09-27T10:10:51Z'
 protocol_category: []
 published_at: '2021-10-13T00:00:00Z'
 related_swc: []

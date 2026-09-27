@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-trust-security-2023-02-20-hats-protocol-1-7
-ingested_at: '2026-09-20T09:26:52Z'
+ingested_at: '2026-09-27T10:10:51Z'
 protocol_category: []
 published_at: '2023-02-20T00:00:00Z'
 related_swc: []
