@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2026-05-13-cyfrin-armada-crowdfund-governance-v2-0-4-5
-ingested_at: '2026-09-27T10:10:51Z'
+ingested_at: '2026-10-04T10:45:09Z'
 protocol_category: []
 published_at: '2026-05-13T00:00:00Z'
 related_swc: []

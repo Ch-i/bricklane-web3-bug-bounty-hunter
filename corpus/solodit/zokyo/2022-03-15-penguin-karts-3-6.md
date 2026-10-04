@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2022-03-15-penguin-karts-3-6
-ingested_at: '2026-09-27T10:10:51Z'
+ingested_at: '2026-10-04T10:45:09Z'
 protocol_category: []
 published_at: '2022-03-15T00:00:00Z'
 related_swc: []

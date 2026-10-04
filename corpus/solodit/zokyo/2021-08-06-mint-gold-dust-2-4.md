@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2021-08-06-mint-gold-dust-2-4
-ingested_at: '2026-09-27T10:10:51Z'
+ingested_at: '2026-10-04T10:45:09Z'
 protocol_category: []
 published_at: '2021-08-06T00:00:00Z'
 related_swc: []

@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2024-07-13-cyfrin-zaros-4-1
-ingested_at: '2026-09-27T10:10:51Z'
+ingested_at: '2026-10-04T10:45:09Z'
 protocol_category: []
 published_at: '2024-07-13T00:00:00Z'
 related_swc: []
