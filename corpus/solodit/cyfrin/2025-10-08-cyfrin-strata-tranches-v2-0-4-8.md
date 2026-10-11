@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-cyfrin-2025-10-08-cyfrin-strata-tranches-v2-0-4-8
-ingested_at: '2026-10-04T10:45:09Z'
+ingested_at: '2026-10-11T11:00:57Z'
 protocol_category: []
 published_at: '2025-10-08T00:00:00Z'
 related_swc: []

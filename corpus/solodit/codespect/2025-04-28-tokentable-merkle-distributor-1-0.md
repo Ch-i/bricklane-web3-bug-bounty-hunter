@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-codespect-2025-04-28-tokentable-merkle-distributor-1-0
-ingested_at: '2026-10-04T10:45:09Z'
+ingested_at: '2026-10-11T11:00:57Z'
 protocol_category: []
 published_at: '2025-04-28T00:00:00Z'
 related_swc: []
