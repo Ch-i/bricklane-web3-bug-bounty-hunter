@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-trust-security-2023-05-28-orbital-finance-1-3
-ingested_at: '2026-10-11T11:00:57Z'
+ingested_at: '2026-10-18T09:02:01Z'
 protocol_category: []
 published_at: '2023-05-28T00:00:00Z'
 related_swc: []
