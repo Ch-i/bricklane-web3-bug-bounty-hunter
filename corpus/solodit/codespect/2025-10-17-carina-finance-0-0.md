@@ -2,13 +2,13 @@
 affected_contracts: []
 derives_from: []
 id: solodit-codespect-2025-10-17-carina-finance-0-0
-ingested_at: '2026-10-18T09:02:01Z'
+ingested_at: '2026-10-25T09:20:00Z'
 protocol_category: []
 published_at: '2025-10-17T00:00:00Z'
 related_swc: []
 severity: Medium
 source: solodit
-source_url: https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2025-10-17-Carina-Finance.md
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2025-10-17-Carina%20Finance.md
 tags:
 - firm:codespect
 - report:2025-10-17-carina-finance
@@ -20,7 +20,7 @@ vuln_class: []
 
 _Section severity (from Solodit section header): Medium_  
 _Audit firm: CODESPECT_  
-_Source report: [2025-10-17-Carina-Finance.md](https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2025-10-17-Carina-Finance.md)_
+_Source report: [2025-10-17-Carina Finance.md](https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2025-10-17-Carina%20Finance.md)_
 
 ---
 

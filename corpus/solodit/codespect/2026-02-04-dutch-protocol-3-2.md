@@ -2,13 +2,13 @@
 affected_contracts: []
 derives_from: []
 id: solodit-codespect-2026-02-04-dutch-protocol-3-2
-ingested_at: '2026-10-18T09:02:01Z'
+ingested_at: '2026-10-25T09:20:00Z'
 protocol_category: []
 published_at: '2026-02-04T00:00:00Z'
 related_swc: []
 severity: Informational
 source: solodit
-source_url: https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2026-02-04-Dutch-Protocol.md
+source_url: https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2026-02-04-Dutch%20Protocol.md
 tags:
 - firm:codespect
 - report:2026-02-04-dutch-protocol
@@ -20,7 +20,7 @@ vuln_class: []
 
 _Section severity (from Solodit section header): Informational_  
 _Audit firm: CODESPECT_  
-_Source report: [2026-02-04-Dutch-Protocol.md](https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2026-02-04-Dutch-Protocol.md)_
+_Source report: [2026-02-04-Dutch Protocol.md](https://github.com/solodit/solodit_content/blob/main/reports/CODESPECT/2026-02-04-Dutch%20Protocol.md)_
 
 ---
 
