@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-codespect-2026-02-04-dutch-protocol-2-5
-ingested_at: '2026-10-25T09:20:00Z'
+ingested_at: '2026-11-01T11:28:42Z'
 protocol_category: []
 published_at: '2026-02-04T00:00:00Z'
 related_swc: []
