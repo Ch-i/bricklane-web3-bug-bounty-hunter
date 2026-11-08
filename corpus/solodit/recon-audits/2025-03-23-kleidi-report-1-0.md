@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-recon-audits-2025-03-23-kleidi-report-1-0
-ingested_at: '2026-11-01T11:28:42Z'
+ingested_at: '2026-11-08T11:29:16Z'
 protocol_category: []
 published_at: '2025-03-23T00:00:00Z'
 related_swc: []

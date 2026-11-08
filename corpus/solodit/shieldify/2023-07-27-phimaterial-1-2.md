@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-shieldify-2023-07-27-phimaterial-1-2
-ingested_at: '2026-11-01T11:28:42Z'
+ingested_at: '2026-11-08T11:29:16Z'
 protocol_category: []
 published_at: '2023-07-27T00:00:00Z'
 related_swc: []
