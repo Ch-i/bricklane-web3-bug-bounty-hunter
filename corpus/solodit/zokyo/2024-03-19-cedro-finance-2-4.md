@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2024-03-19-cedro-finance-2-4
-ingested_at: '2026-11-08T11:29:16Z'
+ingested_at: '2026-11-15T12:10:40Z'
 protocol_category: []
 published_at: '2024-03-19T00:00:00Z'
 related_swc: []

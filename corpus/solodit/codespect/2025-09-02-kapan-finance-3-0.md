@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-codespect-2025-09-02-kapan-finance-3-0
-ingested_at: '2026-11-08T11:29:16Z'
+ingested_at: '2026-11-15T12:10:40Z'
 protocol_category: []
 published_at: '2025-09-02T00:00:00Z'
 related_swc: []
