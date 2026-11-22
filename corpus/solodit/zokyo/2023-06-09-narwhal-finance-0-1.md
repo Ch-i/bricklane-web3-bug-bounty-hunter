@@ -2,7 +2,7 @@
 affected_contracts: []
 derives_from: []
 id: solodit-zokyo-2023-06-09-narwhal-finance-0-1
-ingested_at: '2026-11-15T12:10:40Z'
+ingested_at: '2026-11-22T12:49:27Z'
 protocol_category: []
 published_at: '2023-06-09T00:00:00Z'
 related_swc: []
